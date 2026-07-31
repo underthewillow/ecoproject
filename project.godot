@@ -1,6 +1,6 @@
 ; Engine configuration file.
 ; It's best edited using the editor UI and not directly,
-; since the parameters that go here are meant to be edited using the UI.
+; since the parameters that go here are not all obvious.
 ;
 ; Format:
 ;   [section] ; section goes between []
@@ -12,6 +12,7 @@ config_version=5
 
 config/name="Pond"
 config/features=PackedStringArray("4.7")
+run/main_scene="res://scenes/debug_chart.tscn"
 
 [rendering]
 
