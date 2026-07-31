@@ -19,6 +19,10 @@ var algae: float = 0.0
 var nutrients: float = 0.0
 var detritus: float = 0.0
 
+## Single-body-size population for Phase 2 (§8) - a scalar, not yet the
+## trait-binned distribution §4 introduces in Phase 4.
+var daphnia: float = 0.0
+
 func duplicate_state() -> RefCounted:
 	var copy = get_script().new()
 	copy.tick = tick
@@ -26,4 +30,5 @@ func duplicate_state() -> RefCounted:
 	copy.algae = algae
 	copy.nutrients = nutrients
 	copy.detritus = detritus
+	copy.daphnia = daphnia
 	return copy

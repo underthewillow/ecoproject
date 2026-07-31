@@ -8,23 +8,42 @@ const SimCore = preload("res://sim/core/sim_core.gd")
 const HISTORY_LIMIT := 600
 const DEFAULT_SEED := 12345
 
+## Sim time only advances 10 ticks/real-second at 1x (§3.1's 0.1s timestep),
+## so reaching equilibria that take thousands of sim-seconds would mean
+## sitting here for tens of minutes. Number keys pick a wall-clock multiplier;
+## the headless harness scripts remain the source of truth for acceptance
+## checks, this is purely for eyeballing the shape of a run.
+const SPEED_KEYS := {
+	KEY_1: 1.0,
+	KEY_2: 10.0,
+	KEY_3: 60.0,
+	KEY_4: 300.0,
+}
+const MAX_FRAME_DELTA := 0.25
+
 const SERIES := [
 	{"field": "algae", "color": Color.LIME_GREEN},
 	{"field": "nutrients", "color": Color.DEEP_SKY_BLUE},
 	{"field": "detritus", "color": Color.SANDY_BROWN},
+	{"field": "daphnia", "color": Color.GOLD},
 ]
 
 var _sim: SimCore
 var _accumulator := 0.0
 var _histories: Dictionary = {}
+var _time_scale := 1.0
 
 func _ready() -> void:
 	_sim = SimCore.new(DEFAULT_SEED)
 	for series in SERIES:
 		_histories[series.field] = PackedFloat32Array()
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and SPEED_KEYS.has(event.keycode):
+		_time_scale = SPEED_KEYS[event.keycode]
+
 func _process(delta: float) -> void:
-	_accumulator += delta
+	_accumulator += minf(delta, MAX_FRAME_DELTA) * _time_scale
 	while _accumulator >= SimCore.TICK_DT:
 		_accumulator -= SimCore.TICK_DT
 		_sim.step()
@@ -38,7 +57,11 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	var y_offset := 20
+	draw_string(ThemeDB.fallback_font, Vector2(8, 20),
+		"speed=%sx (press 1-4)" % [int(_time_scale) if _time_scale >= 1.0 else _time_scale],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+
+	var y_offset := 40
 	for series in SERIES:
 		var history: PackedFloat32Array = _histories[series.field]
 		_draw_series(history, series.color)

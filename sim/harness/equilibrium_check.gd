@@ -1,10 +1,14 @@
 extends SceneTree
 
-## Phase 1 acceptance check (§8): algae must reach a stable equilibrium and
-## stay there. Run headless, no scene file needed:
+## Phase 1 acceptance check (§8): algae ALONE (no daphnia grazing) must
+## reach a stable equilibrium and stay there. Kept isolated from Phase 2's
+## daphnia addition via initial_daphnia=0, so this stays a valid regression
+## check on the algae/nutrient/detritus loop specifically. Run headless,
+## no scene file needed:
 ##   godot --headless --path . -s res://sim/harness/equilibrium_check.gd -- --seed=42 --ticks=20000
 
 const SimCore = preload("res://sim/core/sim_core.gd")
+const SimConfig = preload("res://sim/core/sim_config.gd")
 
 const DEFAULT_SEED := 12345
 const DEFAULT_TICKS := 20000
@@ -15,7 +19,9 @@ func _initialize() -> void:
 	var seed_value := _arg_int("--seed=", DEFAULT_SEED)
 	var tick_count := _arg_int("--ticks=", DEFAULT_TICKS)
 
-	var sim := SimCore.new(seed_value)
+	var config := SimConfig.new()
+	config.initial_daphnia = 0.0
+	var sim := SimCore.new(seed_value, config)
 	var earlier_algae := 0.0
 	for i in tick_count:
 		sim.step()

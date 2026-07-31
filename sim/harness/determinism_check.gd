@@ -22,9 +22,9 @@ func _initialize() -> void:
 		sim.step()
 	var final_state := sim.snapshot()
 
-	print("seed=%d tick=%d time=%.4f algae=%.10f nutrients=%.10f detritus=%.10f" % [
+	print("seed=%d tick=%d time=%.4f algae=%.10f nutrients=%.10f detritus=%.10f daphnia=%.10f" % [
 		seed_value, final_state.tick, final_state.time,
-		final_state.algae, final_state.nutrients, final_state.detritus
+		final_state.algae, final_state.nutrients, final_state.detritus, final_state.daphnia
 	])
 	quit()
 
