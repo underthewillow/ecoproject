@@ -26,6 +26,7 @@ const SERIES := [
 	{"field": "nutrients", "color": Color.DEEP_SKY_BLUE},
 	{"field": "detritus", "color": Color.SANDY_BROWN},
 	{"field": "daphnia", "color": Color.GOLD},
+	{"field": "fish", "color": Color.ORCHID},
 ]
 
 var _sim: SimCore

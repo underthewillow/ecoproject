@@ -34,8 +34,21 @@ var daphnia_algae_half_saturation: float = 10.0
 var daphnia_assimilation_efficiency: float = 0.4
 var daphnia_mortality_rate: float = 0.02
 
+# Fish (§3.3) — a scalar population, never trait-binned ("does not evolve
+# in the prototype"). Unlike daphnia's flat mortality rate, fish decline is
+# entirely energy-budget driven: dF = assimilated - maintenance*F, so a
+# fish population shrinks ("starves") whenever intake can't cover upkeep,
+# with no separate baseline death rate needed. Values below came out of
+# the Phase 3 sweep (sim/harness/sweep_phase3.gd) — confirmed to persist
+# 20/20 seeds over a full 54,000-tick run by phase3_validate.gd.
+var fish_ingestion_rate: float = 0.1
+var fish_daphnia_half_saturation: float = 1.0
+var fish_trophic_efficiency: float = 0.10   # ~10% per §3.3
+var fish_maintenance_rate: float = 0.005
+
 # Initial state
 var initial_algae: float = 1.0
 var initial_nutrients: float = 20.0
 var initial_detritus: float = 0.0
 var initial_daphnia: float = 2.0
+var initial_fish: float = 0.5

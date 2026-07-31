@@ -25,22 +25,26 @@ func _init(seed_value: int, config: SimConfig = null) -> void:
 	_state.nutrients = _config.initial_nutrients
 	_state.detritus = _config.initial_detritus
 	_state.daphnia = _config.initial_daphnia
+	_state.fish = _config.initial_fish
 
 func step() -> void:
 	_state.tick += 1
 	_state.time += TICK_DT
 	_step_ecology()
 
-## Algae growth/uptake/mortality (§3.2-3.3) and daphnia grazing/mortality
-## (§3.3, single body size — trait bins arrive in Phase 4), all computed
-## from the pre-tick state and applied together (explicit Euler) so which
-## term gets evaluated first doesn't bias the result.
+## Algae growth/uptake/mortality (§3.2-3.3), daphnia grazing/mortality
+## (§3.3, single body size — trait bins arrive in Phase 4), and fish
+## predation/starvation (§3.3, three trophic levels), all computed from
+## the pre-tick state and applied together (explicit Euler) so which term
+## gets evaluated first doesn't bias the result.
 ##
-## Mass is conserved end to end: grazing moves algae biomass into either
-## daphnia (assimilated) or detritus (egested, unassimilated); daphnia
-## mortality also moves to detritus; detritus remineralises back to
-## nutrients. algae + nutrients + detritus + daphnia stays constant except
-## for what grazing routes between compartments.
+## Mass is conserved end to end except for fish maintenance, which is
+## respired out of the system rather than routed to detritus (tracked in
+## SimState.respired so that stays checkable): grazing moves algae into
+## daphnia (assimilated) or detritus (egested); predation moves daphnia
+## into fish (assimilated, ~10% per §3.3) or detritus (egested); daphnia
+## and fish losses beyond that go to detritus or respiration respectively;
+## detritus remineralises back to nutrients.
 func _step_ecology() -> void:
 	var c := _config
 	var s := _state
@@ -60,10 +64,17 @@ func _step_ecology() -> void:
 	var egested := grazing - assimilated
 	var daphnia_death := c.daphnia_mortality_rate * s.daphnia
 
+	var predation := c.fish_ingestion_rate * s.fish * (s.daphnia / (s.daphnia + c.fish_daphnia_half_saturation))
+	var assimilated_fish := predation * c.fish_trophic_efficiency
+	var egested_fish := predation - assimilated_fish
+	var maintenance_fish := c.fish_maintenance_rate * s.fish
+
 	s.algae = maxf(s.algae + (algae_growth - algae_death - grazing) * TICK_DT, 0.0)
 	s.nutrients = maxf(s.nutrients + (-algae_growth + remineralization) * TICK_DT, 0.0)
-	s.detritus = maxf(s.detritus + (algae_death - remineralization + egested + daphnia_death) * TICK_DT, 0.0)
-	s.daphnia = maxf(s.daphnia + (assimilated - daphnia_death) * TICK_DT, 0.0)
+	s.detritus = maxf(s.detritus + (algae_death - remineralization + egested + daphnia_death + egested_fish) * TICK_DT, 0.0)
+	s.daphnia = maxf(s.daphnia + (assimilated - daphnia_death - predation) * TICK_DT, 0.0)
+	s.fish = maxf(s.fish + (assimilated_fish - maintenance_fish) * TICK_DT, 0.0)
+	s.respired += maintenance_fish * TICK_DT
 
 func snapshot() -> SimState:
 	return _state.duplicate_state()

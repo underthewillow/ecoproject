@@ -40,6 +40,7 @@ func _initialize() -> void:
 					var combo_oscillating := 0
 					for seed_value in range(SEED_COUNT):
 						var config := SimConfig.new()
+						config.initial_fish = 0.0  # isolate from Phase 3's fish addition - SimConfig's default is nonzero now
 						config.daphnia_ingestion_rate = ingestion
 						config.daphnia_mortality_rate = mortality
 						config.daphnia_algae_half_saturation = half_sat

@@ -22,6 +22,7 @@ func _initialize() -> void:
 	config.daphnia_mortality_rate = 0.02
 	config.daphnia_algae_half_saturation = 10.0
 	config.algae_carrying_capacity = 60.0
+	config.initial_fish = 0.0  # isolate from Phase 3's fish addition - SimConfig's default is nonzero now
 
 	var sim := SimCore.new(seed_value, config)
 	var tail_start := int(tick_count * (1.0 - TAIL_FRACTION))

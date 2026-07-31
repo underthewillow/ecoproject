@@ -23,6 +23,17 @@ var detritus: float = 0.0
 ## trait-binned distribution §4 introduces in Phase 4.
 var daphnia: float = 0.0
 
+## Fish population for Phase 3 (§8) - a scalar; fish never evolve (§3.3).
+var fish: float = 0.0
+
+## Cumulative biomass lost to fish metabolic maintenance (§3.3's "starves
+## if intake falls below maintenance"). Unlike every other flow in this
+## sim, maintenance cost is respired out of the system rather than routed
+## to detritus, so it's tracked here purely so mass-conservation checks
+## can verify algae+nutrients+detritus+daphnia+fish+respired stays
+## constant instead of silently "leaking".
+var respired: float = 0.0
+
 func duplicate_state() -> RefCounted:
 	var copy = get_script().new()
 	copy.tick = tick
@@ -31,4 +42,6 @@ func duplicate_state() -> RefCounted:
 	copy.nutrients = nutrients
 	copy.detritus = detritus
 	copy.daphnia = daphnia
+	copy.fish = fish
+	copy.respired = respired
 	return copy
