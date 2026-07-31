@@ -12,14 +12,18 @@ extends RefCounted
 var tick: int = 0
 var time: float = 0.0
 
-## Placeholder scalar standing in for algae biomass until Phase 1 (§3.3)
-## replaces it with real growth/uptake math. It only needs to exist so
-## Phase 0 has something to drive through the RNG and chart.
-var sample: float = 0.0
+## Abiotic pond state that evolves each tick (§3.2). `light` and
+## `temperature` are run parameters, not evolving state, so they live on
+## SimConfig instead.
+var algae: float = 0.0
+var nutrients: float = 0.0
+var detritus: float = 0.0
 
 func duplicate_state() -> RefCounted:
 	var copy = get_script().new()
 	copy.tick = tick
 	copy.time = time
-	copy.sample = sample
+	copy.algae = algae
+	copy.nutrients = nutrients
+	copy.detritus = detritus
 	return copy
