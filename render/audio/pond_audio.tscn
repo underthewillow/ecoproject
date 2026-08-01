@@ -31,7 +31,7 @@ script = ExtResource("1")
 
 [node name="WaterBed" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_water")
-volume_db = -6.0
+volume_db = -10.0
 bus = &"Master"
 
 [node name="Voice1" type="AudioStreamPlayer" parent="."]
