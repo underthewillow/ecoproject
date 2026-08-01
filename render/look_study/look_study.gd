@@ -19,6 +19,12 @@ const DAPHNIA_COLOR := Color.GOLD
 const FISH_COLOR := Color.ORCHID
 const SILT_COLOR := Color(0.75, 0.78, 0.72)
 
+## Matches water_background.gdshader's shallow/deep colors, so organisms
+## blend into the same fog rather than floating on top of it as flat,
+## disconnected UI dots.
+const SHALLOW_WATER_COLOR := Color(0.07, 0.20, 0.24)
+const DEEP_WATER_COLOR := Color(0.01, 0.05, 0.09)
+
 const ALGAE_MAX_PARTICLES := 150
 const DAPHNIA_MAX_PARTICLES := 60
 const FISH_MAX_PARTICLES := 10
@@ -225,6 +231,42 @@ func _contain(particle: Dictionary) -> void:
 		if particle.has("vel"):
 			particle.vel.y = -absf(particle.vel.y)
 
+## Blends a base color toward the ambient water color by depth (y position,
+## same convention as the background shader's fog: top = shallow, bottom =
+## deep), so an organism near the bottom looks like it's sitting inside
+## the murk instead of drawn on top of it in an unrelated flat color.
+func _depth_tint(base_color: Color, pos: Vector2) -> Color:
+	var depth_t := clampf(pos.y / size.y, 0.0, 1.0)
+	var water_tint := SHALLOW_WATER_COLOR.lerp(DEEP_WATER_COLOR, depth_t)
+	return base_color.lerp(water_tint, depth_t * 0.5)
+
+## Cheap stand-in for the background shader's caustic_pattern (not an
+## exact match, just visually consistent) so organisms passing through a
+## bright patch of "light" pick up a bit of extra glow, tying them into
+## the same lighting the water itself is showing.
+func _shimmer(pos: Vector2) -> float:
+	var uv := pos / size
+	var t := _time * 0.3
+	var v := sin(uv.x * 20.0 + t * 3.0) * sin(uv.y * 20.0 - t * 2.4)
+	return clampf(absf(v), 0.0, 1.0)
+
+## Soft, glow-like edge instead of one hard-edged flat circle - three
+## concentric rings of falling alpha, so organisms read as translucent
+## forms suspended in a medium rather than opaque UI markers pasted over
+## the background.
+func _draw_soft_circle(pos: Vector2, radius: float, color: Color) -> void:
+	var halo := color
+	halo.a = color.a * 0.15
+	draw_circle(pos, radius * 2.2, halo)
+	halo.a = color.a * 0.35
+	draw_circle(pos, radius * 1.5, halo)
+	draw_circle(pos, radius, color)
+
+func _draw_organism(pos: Vector2, radius: float, base_color: Color) -> void:
+	var color := _depth_tint(base_color, pos)
+	color = color.lightened(_shimmer(pos) * 0.3)
+	_draw_soft_circle(pos, radius, color)
+
 func _draw() -> void:
 	for s in _silt:
 		var radius: float = lerpf(0.8, 2.2, s.depth)
@@ -232,11 +274,11 @@ func _draw() -> void:
 		color.a = lerpf(0.15, 0.4, s.depth)
 		draw_circle(s.pos, radius, color)
 	for a in _algae:
-		draw_circle(a.pos, 2.5, ALGAE_COLOR)
+		_draw_organism(a.pos, 2.5, ALGAE_COLOR)
 	for d in _daphnia:
-		draw_circle(d.pos, 3.5, DAPHNIA_COLOR)
+		_draw_organism(d.pos, 3.5, DAPHNIA_COLOR)
 	for f in _fish:
-		draw_circle(f.pos, 7.0, FISH_COLOR)
+		_draw_organism(f.pos, 7.0, FISH_COLOR)
 	for p in _pops:
 		var t: float = p.age / POP_DURATION
 		var color: Color = p.color
