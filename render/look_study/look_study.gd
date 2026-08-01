@@ -248,7 +248,7 @@ func _step_daphnia(delta: float) -> void:
 		d.pos += d.vel * delta
 		d.pos.y += DAPHNIA_SINK_SPEED * delta
 		_contain(d)
-		if d.eat_cooldown <= 0.0 and _try_eat(d, _algae, DAPHNIA_EAT_RADIUS, ALGAE_POP_COLOR, _spawn_algae):
+		if d.eat_cooldown <= 0.0 and _try_eat(d, _algae, DAPHNIA_EAT_RADIUS, ALGAE_POP_COLOR, _spawn_algae, 0):
 			d.eat_cooldown = DAPHNIA_EAT_COOLDOWN
 
 ## Fish glide, then dart (§7.1) - long low-effort coasting punctuated by
@@ -273,7 +273,7 @@ func _step_fish(delta: float) -> void:
 		f.pos += f.vel * delta
 		f.wobble_phase += delta * (FISH_WOBBLE_BASE_FREQ + f.vel.length() * FISH_WOBBLE_SPEED_FACTOR)
 		_contain(f)
-		if f.eat_cooldown <= 0.0 and _try_eat(f, _daphnia, FISH_EAT_RADIUS, DAPHNIA_POP_COLOR, _spawn_daphnia):
+		if f.eat_cooldown <= 0.0 and _try_eat(f, _daphnia, FISH_EAT_RADIUS, DAPHNIA_POP_COLOR, _spawn_daphnia, 1):
 			f.eat_cooldown = FISH_EAT_COOLDOWN
 
 ## "Eating" is purely cosmetic: the nearest prey within eat_radius gets
@@ -281,12 +281,17 @@ func _step_fish(delta: float) -> void:
 ## stays exactly what _update_population_targets says it should be - only
 ## individual identity changes, which is all the eye can tell apart anyway.
 ## Gated by a per-predator cooldown (see callers) so eating reads as
-## discrete events instead of a constant strobe of flashes.
-func _try_eat(eater: Dictionary, prey_list: Array[Dictionary], eat_radius: float, pop_color: Color, respawn_fn: Callable) -> bool:
+## discrete events instead of a constant strobe of flashes. Also
+## announces the event via the PondEvents autoload (trophic_level: 0 for
+## daphnia-eats-algae, 1 for fish-eats-daphnia) so the audio system can
+## react without this script knowing or caring that anything is
+## listening - see render/pond_events.gd.
+func _try_eat(eater: Dictionary, prey_list: Array[Dictionary], eat_radius: float, pop_color: Color, respawn_fn: Callable, trophic_level: int) -> bool:
 	var idx := _find_nearest(eater.pos, prey_list, eat_radius)
 	if idx >= 0:
 		_pops.append({"pos": prey_list[idx].pos, "color": pop_color, "age": 0.0})
 		prey_list[idx] = respawn_fn.call()
+		PondEvents.predation.emit(trophic_level)
 		return true
 	return false
 

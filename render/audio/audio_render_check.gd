@@ -10,14 +10,19 @@ extends SceneTree
 ## that can be double-clicked and played without launching the project.
 ##
 ## Run headless:
-##   godot --headless --path . -s res://render/audio/audio_render_check.gd -- --seconds=25 --out=C:/abs/path/out.wav
-
-const PondAudioScene = preload("res://render/audio/pond_audio.tscn")
+##   godot --headless --path . -s res://render/audio/audio_render_check.gd -- --seconds=25 --out=C:/abs/path/out.wav --scene=res://render/look_study/look_study.tscn
+##
+## Defaults to the full look_study scene (not just pond_audio.tscn alone)
+## since that's the only way the creature sim actually runs and fires
+## real PondEvents.predation signals - pond_audio.tscn alone never
+## exercises the interaction-chime path.
 
 var _elapsed := 0.0
 var _duration := 25.0
 var _out_path := "user://sanity_check.wav"
+var _scene_path := "res://render/look_study/look_study.tscn"
 var _record: AudioEffectRecord
+var _predation_count := 0
 
 
 func _initialize() -> void:
@@ -26,14 +31,24 @@ func _initialize() -> void:
 			_duration = float(arg.substr("--seconds=".length()))
 		elif arg.begins_with("--out="):
 			_out_path = arg.substr("--out=".length())
+		elif arg.begins_with("--scene="):
+			_scene_path = arg.substr("--scene=".length())
 
 	var bus_idx := AudioServer.get_bus_index("Master")
 	_record = AudioEffectRecord.new()
 	AudioServer.add_bus_effect(bus_idx, _record)
 	_record.set_recording_active(true)
 
-	var audio := PondAudioScene.instantiate()
-	root.add_child(audio)
+	var scene: PackedScene = load(_scene_path)
+	var instance := scene.instantiate()
+	root.add_child(instance)
+
+	# Referencing the PondEvents autoload by its global script name doesn't
+	# compile inside a custom SceneTree override script the way it does
+	# in ordinary scene scripts - look it up as a node instead (autoloads
+	# are added as children of the tree root under their configured name).
+	var pond_events := root.get_node("PondEvents")
+	pond_events.predation.connect(func(_level): _predation_count += 1)
 
 
 func _process(delta: float) -> bool:
@@ -43,8 +58,8 @@ func _process(delta: float) -> bool:
 		var stream := _record.get_recording()
 		stream.save_to_wav(_out_path)
 		var stats := _pcm_stats(stream)
-		print("saved=%s duration=%.2fs peak=%.4f rms=%.4f has_nan=%s" % [
-			_out_path, _elapsed, stats[0], stats[1], stats[2] > 0.5
+		print("saved=%s duration=%.2fs peak=%.4f rms=%.4f has_nan=%s predation_events=%d" % [
+			_out_path, _elapsed, stats[0], stats[1], stats[2] > 0.5, _predation_count
 		])
 		quit()
 		return true
