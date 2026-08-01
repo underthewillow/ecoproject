@@ -28,6 +28,13 @@ const ALGAE_SPRITE_SIZE := Vector2(8, 8)
 const DAPHNIA_SPRITE_SIZE := Vector2(10, 10)
 const FISH_SPRITE_SIZE := Vector2(18, 11)
 
+## fish.png was generated facing WEST (nose left, tail right) despite
+## requesting direction="east" - that parameter is only weak guidance and
+## the model didn't follow it (confirmed by inspecting the actual file).
+## Without this offset every fish renders rotated 180 degrees from its
+## direction of travel.
+const FISH_FACING_OFFSET := PI
+
 const ALGAE_COLOR := Color.LIME_GREEN
 const DAPHNIA_COLOR := Color.GOLD
 const FISH_COLOR := Color.ORCHID
@@ -303,7 +310,7 @@ func _draw() -> void:
 	for d in _daphnia:
 		_draw_sprite(DAPHNIA_TEXTURE, d.pos, DAPHNIA_SPRITE_SIZE, 0.0, DAPHNIA_COLOR)
 	for f in _fish:
-		_draw_sprite(FISH_TEXTURE, f.pos, FISH_SPRITE_SIZE, f.vel.angle(), FISH_COLOR)
+		_draw_sprite(FISH_TEXTURE, f.pos, FISH_SPRITE_SIZE, f.vel.angle() + FISH_FACING_OFFSET, FISH_COLOR)
 	for p in _pops:
 		var t: float = p.age / POP_DURATION
 		var color: Color = p.color
