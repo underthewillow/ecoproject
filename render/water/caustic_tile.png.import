@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c1m6d5j8x5mtt"
-path="res://.godot/imported/caustic_noise.png-b261f4bb72676ce97be7b54e11202605.ctex"
+uid="uid://d8exfq4f6un2"
+path="res://.godot/imported/caustic_tile.png-ab2e603914ca9cb4dda66a481e37c16d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://render/water/caustic_noise.png"
-dest_files=["res://.godot/imported/caustic_noise.png-b261f4bb72676ce97be7b54e11202605.ctex"]
+source_file="res://render/water/caustic_tile.png"
+dest_files=["res://.godot/imported/caustic_tile.png-ab2e603914ca9cb4dda66a481e37c16d.ctex"]
 
 [params]
 

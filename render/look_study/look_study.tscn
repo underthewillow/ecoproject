@@ -2,11 +2,11 @@
 
 [ext_resource type="Script" path="res://render/look_study/look_study.gd" id="1"]
 [ext_resource type="Shader" path="res://render/water/water_background.gdshader" id="2"]
-[ext_resource type="Texture2D" path="res://render/water/caustic_noise.png" id="3"]
+[ext_resource type="Texture2D" path="res://render/water/caustic_tile.png" id="3"]
 
 [sub_resource type="ShaderMaterial" id="1"]
 shader = ExtResource("2")
-shader_parameter/noise_tex = ExtResource("3")
+shader_parameter/caustic_tex = ExtResource("3")
 
 [node name="LookStudy" type="Control"]
 layout_mode = 3
