@@ -332,6 +332,12 @@ Deferred, but the architecture shouldn't foreclose them:
 - Dissolved oxygen, eutrophication, and the algal-bloom crash *(the first mechanic that can
   kill everything — add only once Phase 4 is stable)*
 - Decomposers as a playable species
+- Multiple distinct species per ecological role (e.g. two algae types, two grazer types,
+  two fish types) — not the same idea as speciation below (that's one lineage branching
+  over time; this is starting with several unrelated species occupying the same trophic
+  level). Interesting for variety and niche differentiation, but multiplies the tuning
+  surface the same way adding trophic levels would (§11.4) — revisit only after Phase 4's
+  single-species evolution mechanic is proven legible and satisfying on its own.
 - Speciation / lineage branching
 - Roster persistence across runs and founder populations from banked lineages
 - Multiple pond types (cold tarn, warm farm pond)
