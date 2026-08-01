@@ -18,9 +18,10 @@ extends Node
 ## "incommensurably" (never resyncing) - the same independent,
 ## non-synchronized-timer idea used here for the pad voices and phrase
 ## generator. The bassline (added after the "give it a groove" request)
-## is the one deliberately repeating element - a steady rhythmic anchor
-## underneath everything else, which is a common ambient/downtempo
-## structure (static pulse + evolving texture on top).
+## is a walking bass grounded in jazz/blues/funk convention (see
+## BASS_* below and _update_bass) rather than a fixed loop - the one
+## rhythmically steady element underneath everything else, but not a
+## repeating riff.
 ##
 ## Reads FakePondState the same way look_study.gd does and writes
 ## nothing back - fully decoupled from the renderer, standing in for
@@ -84,23 +85,37 @@ const INTERACTION_NOTE_AMP := 0.11
 const INTERACTION_ATTACK_TIME := 0.012
 const INTERACTION_DECAY_RATE := 5.5  # ~0.7s ring - a soft droplet, not a sustained tone
 
-## A steady, repeating low pulse - the one deliberately non-generative
-## element, there to give a felt sense of time/groove while playing
-## rather than pure floating ambience. Mostly root, with an occasional
-## lift to the fifth; plenty of rests so it reads as a pulse, not a
-## bassline melody. Deliberately timbrally distinct from every other
-## layer (see _fill_bass) - a filtered, plucked sawtooth rather than the
-## shared bowl tone, closer to a plucked bass guitar - even though it's
-## mixed quiet/subtle in level.
+## A warm, walking bass line grounded in real genre convention rather
+## than a fixed repeating riff (a prior pass used a static 8-beat
+## pattern, which read as too repetitive). Walking bass (jazz/blues)
+## is built from mostly stepwise motion connecting chord tones, not a
+## loop - see _update_bass. The scale is the SAME minor pentatonic used
+## everywhere else in this system, which is not a coincidence: minor
+## pentatonic plus one added "blue note" (a flattened 5th) IS the blues
+## scale, so this bass line adds that blue note back in as an occasional
+## passing tone between the 4th and 5th degrees - exactly where real
+## blues bass lines use it, and nowhere else in the system, so the one
+## deliberately non-just-intonation pitch here stays a passing color
+## rather than a sustained clash. The funk influence is in the dynamics
+## and space (an accent on the turnaround, occasional ghosted/soft notes
+## and rests) rather than extra notes, which would fight the otherwise
+## slow, meditative pace everywhere else.
 const BASS_OCTAVE := 1.0
-const BASS_BEAT_INTERVAL := 0.9  # a slow, steady pulse - well under typical dance tempo
-const BASS_PATTERN_DEGREES: Array[int] = [0, -1, -1, -1, 0, -1, 3, -1]  # index into PENTATONIC_RATIOS; -1 = rest
-const BASS_NOTE_AMP := 0.14
-const BASS_ATTACK_TIME := 0.006  # snappy, plucked attack
-const BASS_DECAY_RATE := 2.4  # punchier than a sustained pad note
-const BASS_FILTER_ENV_DECAY := 7.0  # the filter brightness fades fast (~0.14s) - independent of and quicker than the amplitude decay above, which is what gives a plucked string its characteristic "twang that mellows"
-const BASS_FILTER_MIN_CUTOFF := 0.025  # ~175Hz corner - the dull, resting tone
-const BASS_FILTER_MAX_CUTOFF := 0.35  # ~2450Hz corner - the bright transient right at the pluck
+const BASS_BEAT_INTERVAL := 0.9  # a slow, steady walking pulse - well under typical dance tempo
+const BASS_REST_CHANCE := 0.2  # leaves room for the groove to breathe rather than walking every single beat
+const BASS_MIN_STEPS_BEFORE_TURN := 2
+const BASS_MAX_STEPS_BEFORE_TURN := 4
+const BASS_BLUE_NOTE_RATIO := 1.41421356  # equal-tempered tritone (b5) - deliberately not just intonation, since it's only ever a quick passing tone, never sustained
+const BASS_BLUE_NOTE_CHANCE := 0.18
+const BASS_ACCENT_AMP_MULT := 1.7  # "the one" - an accent on every turnaround
+const BASS_GHOST_CHANCE := 0.3
+const BASS_GHOST_AMP_MULT := 0.5  # a soft, mostly-textural note, funk's "ghost note"
+const BASS_NOTE_AMP := 0.07
+const BASS_ATTACK_TIME := 0.008
+const BASS_DECAY_RATE := 1.7  # warmer/rounder than a snappy pluck
+const BASS_FILTER_ENV_DECAY := 5.0  # the filter brightness fades over ~0.2s - independent of and quicker than the amplitude decay above, giving a soft "thump" onset rather than a sustained brightness
+const BASS_FILTER_MIN_CUTOFF := 0.02  # ~140Hz corner - the warm, dull resting tone
+const BASS_FILTER_MAX_CUTOFF := 0.08  # ~560Hz corner - a gentle brightness lift at the attack, not the aggressive sweep that read as a cartoon "boing" in the previous pass
 
 var _time := 0.0
 
@@ -126,9 +141,13 @@ var _interaction_next_voice := 0
 var _bass_playback: AudioStreamGeneratorPlayback
 var _bass_note := _new_note_voice()
 var _bass_timer := 0.0
-var _bass_beat_index := 0
 var _bass_filter_state := 0.0
 var _bass_filter_env := 0.0
+var _bass_amp_mult := 1.0
+var _bass_degree_index := 0
+var _bass_direction := 1
+var _bass_steps_until_turn := 3
+var _bass_next_is_accent := true
 
 @onready var _drone_player: AudioStreamPlayer = $Drone
 @onready var _voice_players: Array[AudioStreamPlayer] = [$Voice1, $Voice2, $Voice3, $Voice4]
@@ -350,14 +369,17 @@ func _fill_interaction() -> void:
 			playback.push_frame(Vector2(safe_sample, safe_sample))
 
 
-## Deliberately its own synthesis method, not _bowl_wave - a filtered
-## sawtooth instead of the shared additive bowl tone, so the bass reads
-## as a genuinely different instrument (closer to a plucked bass guitar)
-## rather than just a lower-pitched version of everything else. The
-## amplitude envelope (attack/decay) shapes loudness as usual, but the
-## filter cutoff has its OWN, faster-decaying envelope on top - bright
-## at the moment of the pluck, quickly duller - which is what actually
-## reads as "plucked string" rather than "sustained tone."
+## Deliberately its own synthesis method, not _bowl_wave - so the bass
+## reads as a genuinely different instrument rather than a lower-pitched
+## version of everything else. Mostly a triangle wave (research: warmer,
+## rounder, blends better than a raw sawtooth, which is what read as a
+## cartoon "boing" in an earlier pass) with a small sawtooth blend for
+## just enough definition to still feel plucked. The amplitude envelope
+## (attack/decay) shapes loudness as usual; the filter cutoff has its
+## own, faster-decaying envelope on top - a gentle brightness lift right
+## at the attack, quickly settling to a dull, warm sustain - and
+## amp_mult applies the accent/ghost-note dynamic variation decided in
+## _update_bass.
 func _fill_bass() -> void:
 	var frame_dt := 1.0 / MIX_RATE
 	var to_fill := _bass_playback.get_frames_available()
@@ -376,10 +398,12 @@ func _fill_bass() -> void:
 
 		_bass_note.phase += float(_bass_note.freq) * frame_dt
 		var phase: float = _bass_note.phase
+		var triangle: float = (2.0 / PI) * asin(sin(phase * TAU))
 		var saw: float = 2.0 * (phase - floor(phase + 0.5))
-		_bass_filter_state += cutoff * (saw - _bass_filter_state)
+		var tone := triangle * 0.75 + saw * 0.25
+		_bass_filter_state += cutoff * (tone - _bass_filter_state)
 
-		var sample := _bass_filter_state * amp_envelope * BASS_NOTE_AMP
+		var sample := _bass_filter_state * amp_envelope * BASS_NOTE_AMP * _bass_amp_mult
 		var safe_sample := clampf(sample, -1.0, 1.0)
 		_bass_playback.push_frame(Vector2(safe_sample, safe_sample))
 
@@ -415,19 +439,56 @@ func _queue_phrase() -> void:
 	_next_phrase_note_timer = 0.0
 
 
-## The one deliberately repeating element (§8 exception, noted above) -
-## a steady low pulse so the piece has a felt sense of time while
-## playing, underneath the otherwise non-repeating generative layers.
+## A walking bass line (§8) - stepwise motion through the pentatonic/
+## blues scale with a persistent direction that reverses every 2-4
+## steps (an "ascend, then descend" contour, the classic blues shuffle
+## shape) rather than a fixed repeating pattern. Every reversal is
+## treated as a turnaround and gets "the one" - a dynamic accent, funk's
+## strong downbeat anchor - and roughly a fifth of notes are dropped to
+## a soft "ghost note" level instead, for texture without density.
+## Rests leave the groove room to breathe rather than walking every
+## single beat.
 func _update_bass(delta: float) -> void:
 	_bass_timer += delta
 	if _bass_timer < BASS_BEAT_INTERVAL:
 		return
 	_bass_timer -= BASS_BEAT_INTERVAL
-	var degree: int = BASS_PATTERN_DEGREES[_bass_beat_index % BASS_PATTERN_DEGREES.size()]
-	_bass_beat_index += 1
-	if degree >= 0:
-		_trigger_note(_bass_note, ROOT_FREQ * PENTATONIC_RATIOS[degree] * BASS_OCTAVE)
-		_bass_filter_env = 1.0
+
+	if randf() < BASS_REST_CHANCE:
+		return
+
+	# The blue note only ever appears as a passing tone between the 4th
+	# (index 2) and 5th (index 3) degrees while walking through them in
+	# the current direction - the one place real blues bass lines use it.
+	var use_blue_note := false
+	if (_bass_degree_index == 2 and _bass_direction > 0) or (_bass_degree_index == 3 and _bass_direction < 0):
+		use_blue_note = randf() < BASS_BLUE_NOTE_CHANCE
+
+	var freq: float
+	if use_blue_note:
+		freq = ROOT_FREQ * BASS_BLUE_NOTE_RATIO * BASS_OCTAVE
+	else:
+		freq = ROOT_FREQ * PENTATONIC_RATIOS[_bass_degree_index] * BASS_OCTAVE
+
+	var accent := _bass_next_is_accent
+	_bass_next_is_accent = false
+	if accent:
+		_bass_amp_mult = BASS_ACCENT_AMP_MULT
+	elif randf() < BASS_GHOST_CHANCE:
+		_bass_amp_mult = BASS_GHOST_AMP_MULT
+	else:
+		_bass_amp_mult = 1.0
+
+	_trigger_note(_bass_note, freq)
+	_bass_filter_env = 1.0
+
+	_bass_steps_until_turn -= 1
+	var would_leave_bounds := _bass_degree_index + _bass_direction < 0 or _bass_degree_index + _bass_direction >= PENTATONIC_RATIOS.size()
+	if _bass_steps_until_turn <= 0 or would_leave_bounds:
+		_bass_direction *= -1
+		_bass_steps_until_turn = randi_range(BASS_MIN_STEPS_BEFORE_TURN, BASS_MAX_STEPS_BEFORE_TURN)
+		_bass_next_is_accent = true
+	_bass_degree_index = clampi(_bass_degree_index + _bass_direction, 0, PENTATONIC_RATIOS.size() - 1)
 
 
 func _trigger_note(note: Dictionary, freq: float) -> void:

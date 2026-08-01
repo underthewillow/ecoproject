@@ -92,5 +92,5 @@ bus = &"PondAmbient"
 
 [node name="Bass" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_bass")
-volume_db = -4.0
+volume_db = -9.0
 bus = &"PondAmbient"
