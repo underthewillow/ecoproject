@@ -31,7 +31,7 @@ const ROCK_TEXTURES := [
 ]
 
 const ALGAE_SPRITE_SIZE := Vector2(22, 22)
-const DAPHNIA_SPRITE_SIZE := Vector2(38, 38)
+const DAPHNIA_SPRITE_SIZE := Vector2(50, 50)
 const FISH_SPRITE_SIZE := Vector2(56, 68)
 const LILYPAD_SIZE_RANGE := Vector2(70, 110)
 const ROCK_SIZE_RANGE := Vector2(36, 64)
@@ -45,11 +45,17 @@ const ROCK_SIZE_RANGE := Vector2(36, 64)
 ## align the nose with velocity is -90 degrees this time.
 const FISH_FACING_OFFSET := -PI / 2.0
 
-## A single static image can't flex, so the "swimming" motion is faked
-## with a side-to-side rotation wobble layered on top of the facing
-## rotation - like a tail wagging. Speeds up with velocity, so a dart
-## reads as swimming hard rather than just sliding faster.
-const FISH_WOBBLE_AMPLITUDE := 0.22
+## A single static image can't flex, so "swimming" is faked by splitting
+## the image into a rigid body (drawn once, no wobble) and a tail region
+## that rotates around the seam where it joins the body - see
+## _draw_fish(). TAIL_FRACTION is the top fraction of the source image
+## (in the nose-down frame, the tail occupies roughly the top third) -
+## estimated by eye, not measured pixel-exact, so it's the first place to
+## adjust if the seam looks wrong. Wobble is now isolated to just the
+## tail instead of the whole body, and reduced from the old 0.22 - the
+## previous pass rotated the entire fish and was called out as too much.
+const FISH_TAIL_FRACTION := 0.32
+const FISH_WOBBLE_AMPLITUDE := 0.16
 const FISH_WOBBLE_BASE_FREQ := 4.0
 const FISH_WOBBLE_SPEED_FACTOR := 0.03
 
@@ -61,11 +67,11 @@ const ALGAE_MAX_PARTICLES := 150
 const DAPHNIA_MAX_PARTICLES := 60
 const FISH_MAX_PARTICLES := 10
 
-const DAPHNIA_HOP_STRENGTH := 55.0
+const DAPHNIA_HOP_STRENGTH := 65.0
 const DAPHNIA_DAMPING := 8.0
 const DAPHNIA_SINK_SPEED := 4.0
-const DAPHNIA_DETECT_RADIUS := 70.0
-const DAPHNIA_EAT_RADIUS := 10.0
+const DAPHNIA_DETECT_RADIUS := 140.0
+const DAPHNIA_EAT_RADIUS := 16.0
 const DAPHNIA_EAT_COOLDOWN := 1.2
 
 const FISH_GLIDE_SPEED := 18.0
@@ -134,7 +140,7 @@ func _spawn_algae() -> Dictionary:
 	return {"pos": _random_position(), "drift_phase": randf() * TAU}
 
 func _spawn_daphnia() -> Dictionary:
-	return {"pos": _random_position(), "vel": Vector2.ZERO, "hop_timer": randf_range(0.6, 2.2), "eat_cooldown": 0.0}
+	return {"pos": _random_position(), "vel": Vector2.ZERO, "hop_timer": randf_range(0.4, 1.4), "eat_cooldown": 0.0}
 
 func _spawn_fish() -> Dictionary:
 	var angle := randf() * TAU
@@ -209,12 +215,12 @@ func _step_daphnia(delta: float) -> void:
 		d.hop_timer -= delta
 		d.eat_cooldown = maxf(d.eat_cooldown - delta, 0.0)
 		if d.hop_timer <= 0.0:
-			d.hop_timer = randf_range(0.6, 2.2)
+			d.hop_timer = randf_range(0.4, 1.4)
 			var target_index := _find_nearest(d.pos, _algae, DAPHNIA_DETECT_RADIUS)
 			var direction: Vector2
 			if target_index >= 0:
 				direction = (_algae[target_index].pos - d.pos).normalized()
-				direction.y -= 0.3  # keep some of the characteristic upward jerk even while chasing
+				direction.y -= 0.12  # a little of the characteristic upward jerk even while chasing, but mostly a direct line to the target now
 				direction = direction.normalized()
 			else:
 				direction = Vector2(randf_range(-0.4, 0.4), -1.0).normalized()
@@ -310,6 +316,35 @@ func _draw_sprite(texture: Texture2D, pos: Vector2, draw_size: Vector2, rotation
 	draw_texture_rect(texture, Rect2(-draw_size / 2.0, draw_size), false)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
+## Fish get a two-piece draw instead of _draw_sprite: a rigid body (no
+## wobble, rotates only with the overall heading) and a tail cropped from
+## the top of the same source image (see FISH_TAIL_FRACTION), rotated
+## around the seam where it joins the body. That's what makes only the
+## tail wag instead of the whole fish rocking - no second image needed,
+## just draw_texture_rect_region on two sub-rects of the one texture.
+func _draw_fish(f: Dictionary) -> void:
+	var base_rotation: float = f.vel.angle() + FISH_FACING_OFFSET
+	var wobble: float = sin(f.wobble_phase) * FISH_WOBBLE_AMPLITUDE
+
+	var tex_size := FISH_TEXTURE.get_size()
+	var tail_src_height := tex_size.y * FISH_TAIL_FRACTION
+	var tail_local_height := FISH_SPRITE_SIZE.y * FISH_TAIL_FRACTION
+	var body_local_height := FISH_SPRITE_SIZE.y - tail_local_height
+	var seam_local_y := -FISH_SPRITE_SIZE.y / 2.0 + tail_local_height
+
+	draw_set_transform(f.pos, base_rotation, Vector2.ONE)
+	var body_dest := Rect2(Vector2(-FISH_SPRITE_SIZE.x / 2.0, seam_local_y), Vector2(FISH_SPRITE_SIZE.x, body_local_height))
+	var body_src := Rect2(Vector2(0.0, tail_src_height), Vector2(tex_size.x, tex_size.y - tail_src_height))
+	draw_texture_rect_region(FISH_TEXTURE, body_dest, body_src)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	var seam_world: Vector2 = f.pos + Vector2(0, seam_local_y).rotated(base_rotation)
+	draw_set_transform(seam_world, base_rotation + wobble, Vector2.ONE)
+	var tail_dest := Rect2(Vector2(-FISH_SPRITE_SIZE.x / 2.0, -tail_local_height), Vector2(FISH_SPRITE_SIZE.x, tail_local_height))
+	var tail_src := Rect2(Vector2.ZERO, Vector2(tex_size.x, tail_src_height))
+	draw_texture_rect_region(FISH_TEXTURE, tail_dest, tail_src)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
 func _draw() -> void:
 	# Floor decorations first - rocks rest on the pond bottom, underneath
 	# everything that swims.
@@ -326,8 +361,7 @@ func _draw() -> void:
 	for d in _daphnia:
 		_draw_sprite(DAPHNIA_TEXTURE, d.pos, DAPHNIA_SPRITE_SIZE, 0.0)
 	for f in _fish:
-		var wobble := sin(f.wobble_phase) * FISH_WOBBLE_AMPLITUDE
-		_draw_sprite(FISH_TEXTURE, f.pos, FISH_SPRITE_SIZE, f.vel.angle() + FISH_FACING_OFFSET + wobble)
+		_draw_fish(f)
 
 	# Lily pads float on the surface, above the swimming creatures.
 	for p in _lilypads:
