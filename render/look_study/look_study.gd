@@ -23,18 +23,20 @@ const ALGAE_MAX_PARTICLES := 150
 const DAPHNIA_MAX_PARTICLES := 60
 const FISH_MAX_PARTICLES := 10
 
-const DAPHNIA_HOP_STRENGTH := 90.0
+const DAPHNIA_HOP_STRENGTH := 55.0
 const DAPHNIA_DAMPING := 8.0
 const DAPHNIA_SINK_SPEED := 4.0
-const DAPHNIA_DETECT_RADIUS := 80.0
+const DAPHNIA_DETECT_RADIUS := 70.0
 const DAPHNIA_EAT_RADIUS := 6.0
+const DAPHNIA_EAT_COOLDOWN := 1.2
 
-const FISH_GLIDE_SPEED := 25.0
-const FISH_DART_SPEED := 140.0
-const FISH_DETECT_RADIUS := 150.0
+const FISH_GLIDE_SPEED := 18.0
+const FISH_DART_SPEED := 65.0
+const FISH_DETECT_RADIUS := 90.0
 const FISH_EAT_RADIUS := 10.0
+const FISH_EAT_COOLDOWN := 2.0
 
-const POP_DURATION := 0.35
+const POP_DURATION := 0.5
 
 var _time := 0.0
 var _algae: Array[Dictionary] = []
@@ -77,11 +79,11 @@ func _spawn_algae() -> Dictionary:
 	return {"pos": _random_position(), "drift_phase": randf() * TAU}
 
 func _spawn_daphnia() -> Dictionary:
-	return {"pos": _random_position(), "vel": Vector2.ZERO, "hop_timer": randf_range(0.2, 1.5)}
+	return {"pos": _random_position(), "vel": Vector2.ZERO, "hop_timer": randf_range(0.6, 2.2), "eat_cooldown": 0.0}
 
 func _spawn_fish() -> Dictionary:
 	var angle := randf() * TAU
-	return {"pos": _random_position(), "vel": Vector2.RIGHT.rotated(angle) * FISH_GLIDE_SPEED, "dart_timer": randf_range(1.0, 3.0)}
+	return {"pos": _random_position(), "vel": Vector2.RIGHT.rotated(angle) * FISH_GLIDE_SPEED, "dart_timer": randf_range(4.0, 9.0), "eat_cooldown": 0.0}
 
 func _random_position() -> Vector2:
 	return Vector2(randf() * size.x, randf() * size.y)
@@ -91,10 +93,10 @@ func _random_position() -> Vector2:
 ## never reacts to being hunted. Getting eaten just means some daphnia
 ## replaced it with a fresh one elsewhere (see _try_eat).
 func _step_algae(delta: float) -> void:
-	var current := Vector2(sin(_time * 0.1), cos(_time * 0.07)) * 6.0
+	var current := Vector2(sin(_time * 0.08), cos(_time * 0.05)) * 4.0
 	for a in _algae:
-		a.drift_phase += delta * 0.5
-		var wobble := Vector2(sin(a.drift_phase), cos(a.drift_phase * 1.3)) * 3.0
+		a.drift_phase += delta * 0.35
+		var wobble := Vector2(sin(a.drift_phase), cos(a.drift_phase * 1.3)) * 2.0
 		a.pos += (current + wobble) * delta
 		_contain(a)
 
@@ -105,8 +107,9 @@ func _step_algae(delta: float) -> void:
 func _step_daphnia(delta: float) -> void:
 	for d in _daphnia:
 		d.hop_timer -= delta
+		d.eat_cooldown = maxf(d.eat_cooldown - delta, 0.0)
 		if d.hop_timer <= 0.0:
-			d.hop_timer = randf_range(0.3, 1.4)
+			d.hop_timer = randf_range(0.6, 2.2)
 			var target_index := _find_nearest(d.pos, _algae, DAPHNIA_DETECT_RADIUS)
 			var direction: Vector2
 			if target_index >= 0:
@@ -120,7 +123,8 @@ func _step_daphnia(delta: float) -> void:
 		d.pos += d.vel * delta
 		d.pos.y += DAPHNIA_SINK_SPEED * delta
 		_contain(d)
-		_try_eat(d, _algae, DAPHNIA_EAT_RADIUS, ALGAE_COLOR, _spawn_algae)
+		if d.eat_cooldown <= 0.0 and _try_eat(d, _algae, DAPHNIA_EAT_RADIUS, ALGAE_COLOR, _spawn_algae):
+			d.eat_cooldown = DAPHNIA_EAT_COOLDOWN
 
 ## Fish glide, then dart (§7.1) - long low-effort coasting punctuated by
 ## sudden acceleration. Darts aim at the nearest daphnia in range when one
@@ -129,28 +133,36 @@ func _step_daphnia(delta: float) -> void:
 func _step_fish(delta: float) -> void:
 	for f in _fish:
 		f.dart_timer -= delta
+		f.eat_cooldown = maxf(f.eat_cooldown - delta, 0.0)
 		if f.dart_timer <= 0.0:
-			f.dart_timer = randf_range(1.5, 4.0)
+			f.dart_timer = randf_range(4.0, 9.0)
 			var target_index := _find_nearest(f.pos, _daphnia, FISH_DETECT_RADIUS)
 			if target_index >= 0:
 				f.vel = (_daphnia[target_index].pos - f.pos).normalized() * FISH_DART_SPEED
 			else:
 				var turn := randf_range(-1.2, 1.2)
 				f.vel = f.vel.rotated(turn).normalized() * FISH_DART_SPEED
-		f.vel = f.vel.move_toward(f.vel.normalized() * FISH_GLIDE_SPEED, FISH_GLIDE_SPEED * delta)
+		# Glide decay is much gentler than the dart itself, so most of a
+		# fish's time reads as coasting, not accelerating.
+		f.vel = f.vel.move_toward(f.vel.normalized() * FISH_GLIDE_SPEED, FISH_GLIDE_SPEED * 0.4 * delta)
 		f.pos += f.vel * delta
 		_contain(f)
-		_try_eat(f, _daphnia, FISH_EAT_RADIUS, DAPHNIA_COLOR, _spawn_daphnia)
+		if f.eat_cooldown <= 0.0 and _try_eat(f, _daphnia, FISH_EAT_RADIUS, DAPHNIA_COLOR, _spawn_daphnia):
+			f.eat_cooldown = FISH_EAT_COOLDOWN
 
 ## "Eating" is purely cosmetic: the nearest prey within eat_radius gets
 ## replaced by a freshly spawned one elsewhere, so the population count
 ## stays exactly what _update_population_targets says it should be - only
 ## individual identity changes, which is all the eye can tell apart anyway.
-func _try_eat(eater: Dictionary, prey_list: Array[Dictionary], eat_radius: float, pop_color: Color, respawn_fn: Callable) -> void:
+## Gated by a per-predator cooldown (see callers) so eating reads as
+## discrete events instead of a constant strobe of flashes.
+func _try_eat(eater: Dictionary, prey_list: Array[Dictionary], eat_radius: float, pop_color: Color, respawn_fn: Callable) -> bool:
 	var idx := _find_nearest(eater.pos, prey_list, eat_radius)
 	if idx >= 0:
 		_pops.append({"pos": prey_list[idx].pos, "color": pop_color, "age": 0.0})
 		prey_list[idx] = respawn_fn.call()
+		return true
+	return false
 
 func _find_nearest(pos: Vector2, list: Array[Dictionary], max_radius: float) -> int:
 	var best_index := -1
