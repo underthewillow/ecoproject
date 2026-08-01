@@ -38,16 +38,19 @@ void fragment() {
 	vec3 deep_color = vec3(0.01, 0.04, 0.08);
 	vec3 base = mix(shallow_color, deep_color, uv.y);
 
-	// Caustics: one slowly-scrolling sample of the generated caustic tile,
-	// tiled at close to its native 32px pixel density across the low-res
-	// canvas (288x162 -> ~9x5 repeats), not stretched to fill it - that
+	// Caustics: a STATIC sample of the generated caustic tile, tiled at
+	// close to its native 32px pixel density across the low-res canvas
+	// (288x162 -> ~9x5 repeats), not stretched to fill it - that
 	// stretching (and, before this pass, sampling at 1:1 canvas scale
 	// against a much larger non-pixel-art window) is what caused a
-	// visible tiling grid and blur in earlier attempts. Threshold by
-	// luminance so only the brightest part of the illustrated pattern
-	// shows, rather than blending its own water-colored background on
-	// top of ours.
-	vec2 caustic_uv = uv * vec2(9.0, 5.0) + vec2(t * 0.3, t * 0.2);
+	// visible tiling grid and blur in earlier attempts. No scroll: the
+	// tile's content is one bold arc/wave shape rather than an evenly
+	// distributed texture, so scrolling it made that shape periodically
+	// sweep across the screen as a distracting pulsing line (confirmed
+	// on video - see git history). Threshold by luminance so only the
+	// brightest part of the illustrated pattern shows, rather than
+	// blending its own water-colored background on top of ours.
+	vec2 caustic_uv = uv * vec2(9.0, 5.0);
 	vec3 caustic_sample = texture(caustic_tex, caustic_uv).rgb;
 	float luminance = dot(caustic_sample, vec3(0.299, 0.587, 0.114));
 	float caustic_strength = 1.0 - uv.y * 0.85;
