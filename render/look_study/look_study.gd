@@ -31,17 +31,27 @@ const ROCK_TEXTURES := [
 ]
 
 const ALGAE_SPRITE_SIZE := Vector2(22, 22)
-const DAPHNIA_SPRITE_SIZE := Vector2(26, 26)
+const DAPHNIA_SPRITE_SIZE := Vector2(38, 38)
 const FISH_SPRITE_SIZE := Vector2(56, 68)
 const LILYPAD_SIZE_RANGE := Vector2(70, 110)
 const ROCK_SIZE_RANGE := Vector2(36, 64)
 
-## fish.png was generated nose-up (head at the top of the frame, tail at
-## the bottom) - confirmed by inspecting the file. draw_set_transform's
-## rotation=0 already points the image's own "up" in screen -Y, so to
-## align the nose with the velocity direction the offset is +90 degrees,
-## not the 180 the old side-view sprite needed.
-const FISH_FACING_OFFSET := PI / 2.0
+## fish.png (v2, the version with visible eyes) was generated nose-DOWN -
+## head/eyes at the bottom of the frame, tail curving up top - the
+## opposite of the first version. Confirmed by inspecting the file, not
+## assumed: regenerating with a near-identical prompt does not guarantee
+## the same orientation twice. draw_set_transform's rotation=0 points the
+## image's own "down" (+Y) in that direction already, so the offset to
+## align the nose with velocity is -90 degrees this time.
+const FISH_FACING_OFFSET := -PI / 2.0
+
+## A single static image can't flex, so the "swimming" motion is faked
+## with a side-to-side rotation wobble layered on top of the facing
+## rotation - like a tail wagging. Speeds up with velocity, so a dart
+## reads as swimming hard rather than just sliding faster.
+const FISH_WOBBLE_AMPLITUDE := 0.22
+const FISH_WOBBLE_BASE_FREQ := 4.0
+const FISH_WOBBLE_SPEED_FACTOR := 0.03
 
 const ALGAE_POP_COLOR := Color(0.55, 0.85, 0.5)
 const DAPHNIA_POP_COLOR := Color(0.75, 0.88, 0.95)
@@ -128,7 +138,13 @@ func _spawn_daphnia() -> Dictionary:
 
 func _spawn_fish() -> Dictionary:
 	var angle := randf() * TAU
-	return {"pos": _random_position(), "vel": Vector2.RIGHT.rotated(angle) * FISH_GLIDE_SPEED, "dart_timer": randf_range(4.0, 9.0), "eat_cooldown": 0.0}
+	return {
+		"pos": _random_position(),
+		"vel": Vector2.RIGHT.rotated(angle) * FISH_GLIDE_SPEED,
+		"dart_timer": randf_range(4.0, 9.0),
+		"eat_cooldown": 0.0,
+		"wobble_phase": randf() * TAU,
+	}
 
 func _spawn_silt() -> Dictionary:
 	return {"pos": _random_position(), "drift_phase": randf() * TAU, "depth": randf()}
@@ -230,6 +246,7 @@ func _step_fish(delta: float) -> void:
 		# fish's time reads as coasting, not accelerating.
 		f.vel = f.vel.move_toward(f.vel.normalized() * FISH_GLIDE_SPEED, FISH_GLIDE_SPEED * 0.4 * delta)
 		f.pos += f.vel * delta
+		f.wobble_phase += delta * (FISH_WOBBLE_BASE_FREQ + f.vel.length() * FISH_WOBBLE_SPEED_FACTOR)
 		_contain(f)
 		if f.eat_cooldown <= 0.0 and _try_eat(f, _daphnia, FISH_EAT_RADIUS, DAPHNIA_POP_COLOR, _spawn_daphnia):
 			f.eat_cooldown = FISH_EAT_COOLDOWN
@@ -309,7 +326,8 @@ func _draw() -> void:
 	for d in _daphnia:
 		_draw_sprite(DAPHNIA_TEXTURE, d.pos, DAPHNIA_SPRITE_SIZE, 0.0)
 	for f in _fish:
-		_draw_sprite(FISH_TEXTURE, f.pos, FISH_SPRITE_SIZE, f.vel.angle() + FISH_FACING_OFFSET)
+		var wobble := sin(f.wobble_phase) * FISH_WOBBLE_AMPLITUDE
+		_draw_sprite(FISH_TEXTURE, f.pos, FISH_SPRITE_SIZE, f.vel.angle() + FISH_FACING_OFFSET + wobble)
 
 	# Lily pads float on the surface, above the swimming creatures.
 	for p in _lilypads:
