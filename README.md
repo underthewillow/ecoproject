@@ -64,13 +64,19 @@ sim/                         Track A — headless simulation core
                                 the mean-size gap between with-fish and without-fish runs
     phase4_validate.gd          Confirms the chosen combo across seeds and full duration,
                                 including a single run that introduces then removes fish
+    phase5_validate.gd          A scripted "naive policy" (introduce whichever species is
+                                missing, in order, as capacity allows) proxies the human
+                                legibility claim headlessly: does it reach three-trophic
+                                coexistence and stay alive across a full session?
   species/                    Currently empty — reserved for a possible future species
                                 beyond daphnia/fish/algae; see docs/pond-prototype-plan.md §9
 
 scenes/
-  debug_chart.tscn / .gd      Track A's live line chart of raw sim state - no styling,
-                               reads snapshots only, never touches the sim. The project's
-                               current default scene.
+  debug_chart.tscn / .gd      Track A's live line chart of raw sim state, plus (Phase 5) a
+                               minimal interactive panel for the two player verbs - introduce
+                               a species with a chosen founder count, add nutrients - so the
+                               sim is actually clickable ahead of Track B's real UI/art. The
+                               project's current default scene.
 
 render/                      Track B — look/motion/audio study
   look_study/
@@ -100,15 +106,49 @@ project.godot                 Godot project config; also registers the pond_even
 
 ## Track A status
 
-Phases 0-4 are implemented and passing their headless acceptance checks: deterministic
+Phases 0-5 are implemented and passing their headless acceptance checks: deterministic
 core, algae-alone equilibrium, sustained daphnia/algae predator-prey oscillation,
-three-trophic-level persistence (algae → daphnia → fish), and now daphnia trait-bin
-evolution — each validated over a full ~90 simulated-minute run, not just a short
-exploratory window. Phase 4's specific claim (introduce fish and mean daphnia body size
-falls; remove them and it climbs back) is confirmed both as two separate 20-seed runs and
-as a single dynamic run that introduces then removes fish mid-session. Phase 5 (the
-player-facing setup layer) — which is what would make this an actually playable game
-rather than a headless/debug-chart simulation — hasn't started yet.
+three-trophic-level persistence (algae → daphnia → fish), daphnia trait-bin evolution, and
+now the player layer — introduce a species with a chosen founder size, one pond-capacity
+resource that regenerates faster the more trophic levels are currently coexisting (not just
+from raw biomass - a single thriving species isn't rewarded the same as a genuinely balanced
+web), a nutrient lever, and a collapse/restart mechanic ("no hard fail state" - a crashed
+pond resets to a hardier producer-only base rather than ending the run) — each validated
+over a full ~90 simulated-minute run, not just a short exploratory window.
+
+Phase 5 is genuinely a headless-mechanics-first pass: Track A still has no rendering
+dependencies of its own, and the debug chart's new buttons are a bare-bones exception built
+specifically so the sim is clickable at all before Track B's real UI/art exist at the
+Phase 6 merge. Its acceptance criterion ("a person who's never seen the game can reach
+Act 3 without instruction") is a human-legibility claim that a headless check can't fully
+settle - `phase5_validate.gd` checks a scripted proxy instead: a "naive policy" that only
+knows the design doc's own stated rules (introduce algae → daphnia → fish in order, spend
+capacity as it allows, top up nutrients when low, and if the pond ever collapses, notice
+and reintroduce whatever's missing) reaches three-trophic coexistence and is still alive at
+the end of the session, across 20 seeds, with zero knowledge of the sim's internal tuning
+constants. Whether it's actually *legible* to a real stranger is a question for after
+Phase 6, once there's a real interface to hand someone.
+
+Direct playtesting found the default pace outrunning reaction time, so `SimConfig` now has a
+`Difficulty` preset (Challenging/Casual/Relaxing, at 1x/0.5x/0.25x) that applies a single
+time-dilation multiplier to every ecological rate at once (see `sim_core.gd`'s
+`_step_ecology`/`_step_daphnia_bins`, which compute `TICK_DT * pace_scale` in place of the
+bare tick constant wherever a flow gets applied). Scaling every rate uniformly is a pure
+similarity transform - the same oscillations and collapses happen, just stretched out - so
+it needed no re-tuning of the Phase 2-4 sweeps; `phase5_validate.gd` confirms the naive
+playthrough still reaches and survives Act 3 under all three presets (Relaxing takes about
+4x as many ticks to reach Act 3 as Challenging, matching the transform exactly). The debug
+chart has live buttons for all three so they can be A/B'd in one sitting.
+
+One real finding from building this: dropping a daphnia founder into an algae population
+that's already grown large and unaccompanied (rather than growing together from small
+values, the only regime Phase 2's own sweep ever validated) can trigger an explosive
+population boom that grazes algae to extinction in a few hundred ticks. Phase 5's founder
+counts and economy pacing deliberately keep introductions close together in both time and
+magnitude to stay inside the proven-stable regime; the collapse/restart mechanic exists
+precisely because even inside that regime, this ecology can still eventually crash on its
+own after a long healthy run - which is a feature (§1's "a story, not a game over"), not a
+bug, as long as the pond actually recovers afterward instead of staying stuck.
 
 Run any acceptance check directly:
 
@@ -119,6 +159,7 @@ godot --headless --path . -s res://sim/harness/mass_conservation_check.gd -- --s
 godot --headless --path . -s res://sim/harness/phase2_validate.gd -- --seed=42 --ticks=54000
 godot --headless --path . -s res://sim/harness/phase3_validate.gd
 godot --headless --path . -s res://sim/harness/phase4_validate.gd
+godot --headless --path . -s res://sim/harness/phase5_validate.gd
 ```
 
 The three sweep scripts (`sweep_phase2.gd`, `sweep_phase3.gd`, `sweep_phase4.gd`)

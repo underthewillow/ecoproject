@@ -45,6 +45,19 @@ var fish: float = 0.0
 ## constant instead of silently "leaking".
 var respired: float = 0.0
 
+## Phase 5 player layer (§6). `capacity` is the one resource that funds
+## introduce-species and add-nutrients actions - framed as the pond's own
+## life-support capacity rather than an abstract currency: it grows as the
+## pond demonstrates it can sustain a balanced food web (see sim_core.gd's
+## _step_ecology for the actual regen formula - biomass alone isn't enough,
+## multiple trophic levels coexisting is what's rewarded), not just from
+## raw biomass accumulating regardless of how it's distributed.
+## `collapse_count` counts how many times the pond has crashed from the
+## bottom and been simplified back to a hardier base (§1 pillar 3) - purely
+## observational, nothing reads it back into the ecology.
+var capacity: float = 0.0
+var collapse_count: int = 0
+
 func duplicate_state() -> RefCounted:
 	var copy = get_script().new()
 	copy.tick = tick
@@ -57,4 +70,6 @@ func duplicate_state() -> RefCounted:
 	copy.daphnia_bins = daphnia_bins.duplicate()
 	copy.fish = fish
 	copy.respired = respired
+	copy.capacity = capacity
+	copy.collapse_count = collapse_count
 	return copy

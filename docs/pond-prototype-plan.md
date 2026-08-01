@@ -196,7 +196,11 @@ bins.
 
 ### 6.3 Economy
 
-One currency. It regenerates at a rate proportional to total living biomass, so a healthy
+One resource: the pond's own life-support capacity, not an abstract currency. It regenerates
+each tick proportional to total living biomass *multiplied by* how many trophic levels are
+currently coexisting — a pond that's only ever grown algae earns at the base rate, one with
+algae and daphnia together earns faster, a full algae-daphnia-fish web faster still. A single
+thriving species isn't rewarded the same as a genuinely balanced one; a healthy, balanced
 pond funds further introductions. No unlock trees, no cooldowns, no tech tiers in the
 prototype — one scarce resource is enough to make sequencing feel weighty, and the point is
 to find out whether it *does* before building anything more elaborate.
@@ -292,8 +296,8 @@ Three trophic levels, ~10% efficiency, starvation.
 are removed. Verified across seeds in the harness.
 
 **Phase 5 — Player layer**
-Empty pond start, abiotic setup screen, introduce-species with founder size, currency,
-nutrient lever.
+Empty pond start, abiotic setup screen, introduce-species with founder size, pond-capacity
+economy, nutrient lever.
 → A person who has never seen the game can reach Act 3 without instruction.
 
 ### Track B — Look and motion study

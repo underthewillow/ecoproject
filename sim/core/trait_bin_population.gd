@@ -83,12 +83,23 @@ func mean_trait() -> float:
 
 
 ## Seeds the population across bins as a Gaussian-shaped distribution
-## centered on center_trait, with std-dev width_fraction * trait_range.
-## This is the founder-bottleneck mechanic (§6.2): a small founder should
-## seed with a narrow width_fraction (little variation for selection to
-## act on — evolves sluggishly no matter the pressure applied), a large
-## founder with a wide one (full spread, adapts readily).
+## centered on center_trait, with std-dev width_fraction * trait_range,
+## replacing whatever was there before. This is the founder-bottleneck
+## mechanic (§6.2): a small founder should seed with a narrow width_fraction
+## (little variation for selection to act on — evolves sluggishly no matter
+## the pressure applied), a large founder with a wide one (full spread,
+## adapts readily). Used for a run's initial population.
 func seed_population(total_count: float, center_trait: float, width_fraction: float) -> void:
+	densities.fill(0.0)
+	add_population(total_count, center_trait, width_fraction)
+
+
+## Same Gaussian-shaped distribution as seed_population, but added on top of
+## whatever's already in each bin rather than replacing it. This is the
+## runtime version of the founder-bottleneck mechanic (§6.2/§6.1) — a
+## mid-run "introduce more of this species" action, which shouldn't erase
+## individuals already selected for by prior ecology.
+func add_population(total_count: float, center_trait: float, width_fraction: float) -> void:
 	var width := maxf(width_fraction, 0.0001) * (trait_max - trait_min)
 	var weights: Array[float] = []
 	weights.resize(bin_count)
@@ -99,7 +110,7 @@ func seed_population(total_count: float, center_trait: float, width_fraction: fl
 		weights[i] = weight
 		weight_sum += weight
 	for i in bin_count:
-		densities[i] = total_count * weights[i] / weight_sum
+		densities[i] += total_count * weights[i] / weight_sum
 
 
 ## Applies one tick of population change.

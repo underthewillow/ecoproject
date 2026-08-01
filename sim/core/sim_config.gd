@@ -105,3 +105,99 @@ var initial_algae: float = 1.0
 var initial_nutrients: float = 20.0
 var initial_detritus: float = 0.0
 var initial_fish: float = 0.5
+
+# --- Difficulty / pacing --------------------------------------------------
+# A single time-dilation multiplier applied uniformly to every ecological
+# rate - see sim_core.gd's _step_ecology and _step_daphnia_bins, which both
+# compute `TICK_DT * pace_scale` in place of the bare TICK_DT constant
+# wherever a flow actually gets applied to state. Scaling every rate by the
+# same factor is a pure similarity transform: the same oscillations, the
+# same collapses, the same trait-evolution curves happen, just stretched
+# out in time - so a non-default pace_scale needs no re-tuning or
+# re-validation against the Phase 2-4 sweeps, only more real-world session
+# length to cover the same story arc. Introduction/nutrient costs are
+# untouched by this (they're one-time spends against capacity, not
+# per-tick rates).
+#
+# Defaults to Difficulty.CHALLENGING (pace_scale = 1.0) so every existing
+# harness is completely unaffected. Direct playtesting found the default
+# pace outrunning reaction time, hence Difficulty.CASUAL as a slower
+# preset; CASUAL itself then played well enough to want something slower
+# still, hence Difficulty.RELAXING - see sim/harness/phase5_validate.gd,
+# which checks the naive playthrough still reaches and survives Act 3
+# under all three presets.
+enum Difficulty { CHALLENGING, CASUAL, RELAXING }
+const PACE_SCALE_BY_DIFFICULTY := {
+	Difficulty.CHALLENGING: 1.0,
+	Difficulty.CASUAL: 0.5,
+	Difficulty.RELAXING: 0.25,
+}
+var pace_scale: float = 1.0
+
+func set_difficulty(difficulty: Difficulty) -> void:
+	pace_scale = PACE_SCALE_BY_DIFFICULTY[difficulty]
+
+# --- Phase 5: player layer (§6) -----------------------------------------
+# One resource - "capacity," the pond's own life-support capacity, not an
+# abstract currency (§6.3) - funds introductions and nutrients. It doesn't
+# just accumulate with raw biomass: regen scales with biomass MULTIPLIED by
+# how many trophic levels are currently coexisting above
+# capacity_presence_floor (see sim_core.gd's _step_ecology) - a pond that's
+# only ever had algae earns at the base rate, one with algae+daphnia earns
+# at 2x, a full algae+daphnia+fish web at 3x. That's the actual feedback
+# loop: the more balanced the pond currently is, the faster it can afford
+# the next intervention, rather than a lone thriving species being just as
+# "productive" as a genuinely balanced web. capacity_regen_rate itself was
+# raised well above a first pass's value after that pass played too slow to
+# feel responsive in practice - a headless check can measure "does this
+# eventually work," not "does this feel snappy," so this number in
+# particular is the most likely one to need another pass once there's a
+# real UI to play against.
+#
+# Introduction cost scales super-linearly with founder count (exponent > 1)
+# so "always buy the biggest founder" isn't strictly dominant - that would
+# flatten §6.2's actual tradeoff (large founder = costly but adapts
+# readily; small = cheap but evolves sluggishly) into "big is just better."
+# Species base costs scale with trophic level so misordering (fish before
+# daphnia, §6.1) also hurts economically, not just visibly. Checked by
+# sim/harness/phase5_validate.gd's scripted naive playthrough (does
+# introduce algae -> daphnia -> fish in order, as capacity allows, reach
+# three-trophic persistence within one ~90 sim-minute session?).
+var capacity_regen_rate: float = 0.025
+var capacity_presence_floor: float = 0.1
+var initial_capacity: float = 10.0
+var introduction_cost_exponent: float = 1.15
+var algae_introduction_base_cost: float = 2.0
+var daphnia_introduction_base_cost: float = 5.0
+var fish_introduction_base_cost: float = 10.0
+var nutrient_cost_per_unit: float = 0.5
+
+# Daphnia founder width (§6.2): "founder size determines the width of the
+# initial distribution across bins" - a lerp between a narrow and a wide
+# width_fraction, saturating at daphnia_founder_reference_count individuals.
+var daphnia_founder_min_width: float = 0.05
+var daphnia_founder_max_width: float = 0.5
+var daphnia_founder_reference_count: float = 10.0
+
+# Collapse/restart (§1 pillar 3): "no hard fail state... a collapse
+# simplifies the pond and restarts succession from a hardier base." Gated
+# behind enable_collapse_restart, defaulted off, so Phases 1-4's already
+# sweep-validated dynamics stay completely unaffected; only Phase 5 callers
+# (the debug UI, phase5_validate.gd) opt in explicitly.
+#
+# collapse_threshold is deliberately tiny, not "low" - Phase 2's own
+# validated algae/daphnia oscillation legitimately dips into the 1e-3 range
+# at its troughs without that being a collapse (confirmed by direct
+# measurement: algae reached 0.0041 mid-run and recovered). What actually
+# distinguishes a real "grazed to nothing" collapse from a deep-but-healthy
+# trough is that algae growth is multiplicative on standing algae
+# (algae_growth_rate * algae * ...) - once algae is floored to exactly 0.0
+# by _step_ecology's maxf(...,0.0), growth is 0 forever and it can never
+# recover on its own, whereas any nonzero trough, however small, still has
+# a nonzero growth term and can climb back. So "at or below this threshold"
+# is meant to mean "actually pinned at the zero fixed point," not merely
+# "a low point in the cycle" - a much smaller number than the 0.01 a first
+# pass used, which turned out to fire on ordinary troughs instead.
+var enable_collapse_restart: bool = false
+var collapse_threshold: float = 1e-6
+var restart_algae_seed: float = 1.0
