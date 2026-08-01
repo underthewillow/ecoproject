@@ -18,6 +18,8 @@ extends Control
 ## "eating" just respawns the prey particle elsewhere with a brief flash.
 ## Nothing here talks to the real sim.
 
+const FakePondState = preload("res://render/fake_pond_state.gd")
+
 const ALGAE_TEXTURE := preload("res://render/sprites/algae.png")
 const DAPHNIA_TEXTURE := preload("res://render/sprites/daphnia.png")
 const FISH_TEXTURE := preload("res://render/sprites/fish.png")
@@ -132,16 +134,14 @@ func _process(delta: float) -> void:
 
 ## Log-scaled, hard-capped mapping from a (fake) population number to a
 ## particle count (§4.1) - the same pipeline the real sim drives at
-## Phase 6, just fed a sine wave here instead of a snapshot.
+## Phase 6, just fed a sine wave here instead of a snapshot. The formula
+## itself lives in FakePondState so the audio system (audio/pond_audio.gd)
+## reads the exact same fake state independently, without either script
+## depending on the other.
 func _update_population_targets() -> void:
-	_resize(_algae, _fake_population_to_count(40.0, 0.05, 0.0, ALGAE_MAX_PARTICLES), _spawn_algae)
-	_resize(_daphnia, _fake_population_to_count(20.0, 0.11, 2.0, DAPHNIA_MAX_PARTICLES), _spawn_daphnia)
-	_resize(_fish, _fake_population_to_count(5.0, 0.04, 4.5, FISH_MAX_PARTICLES), _spawn_fish)
-
-func _fake_population_to_count(amplitude: float, freq: float, phase: float, max_particles: int) -> int:
-	var raw_population := amplitude * (1.0 + sin(_time * freq + phase))
-	var scaled := log(raw_population + 1.0) * 8.0
-	return clampi(int(scaled), 0, max_particles)
+	_resize(_algae, FakePondState.algae_count(_time, ALGAE_MAX_PARTICLES), _spawn_algae)
+	_resize(_daphnia, FakePondState.daphnia_count(_time, DAPHNIA_MAX_PARTICLES), _spawn_daphnia)
+	_resize(_fish, FakePondState.fish_count(_time, FISH_MAX_PARTICLES), _spawn_fish)
 
 func _resize(list: Array[Dictionary], target_count: int, spawn_fn: Callable) -> void:
 	while list.size() < target_count:
