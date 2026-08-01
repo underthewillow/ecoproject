@@ -14,10 +14,10 @@ extends Control
 ## predator/prey interaction reads as such by eye, same as the rest of
 ## Track B.
 
-const WATER_COLOR := Color(0.05, 0.12, 0.18)
 const ALGAE_COLOR := Color.LIME_GREEN
 const DAPHNIA_COLOR := Color.GOLD
 const FISH_COLOR := Color.ORCHID
+const SILT_COLOR := Color(0.75, 0.78, 0.72)
 
 const ALGAE_MAX_PARTICLES := 150
 const DAPHNIA_MAX_PARTICLES := 60
@@ -38,14 +38,21 @@ const FISH_EAT_COOLDOWN := 2.0
 
 const POP_DURATION := 0.5
 
+## Silt is pure atmosphere (§8's Phase B2 checklist), not a species - a
+## fixed count, no population target, no interaction with anything else.
+const SILT_COUNT := 40
+
 var _time := 0.0
 var _algae: Array[Dictionary] = []
 var _daphnia: Array[Dictionary] = []
 var _fish: Array[Dictionary] = []
 var _pops: Array[Dictionary] = []
+var _silt: Array[Dictionary] = []
 
 func _ready() -> void:
 	randomize()  # cosmetic layer only - no determinism requirement here, unlike the sim's seeded RNG
+	for i in SILT_COUNT:
+		_silt.append(_spawn_silt())
 
 func _process(delta: float) -> void:
 	_time += delta
@@ -54,6 +61,7 @@ func _process(delta: float) -> void:
 	_step_daphnia(delta)
 	_step_fish(delta)
 	_step_pops(delta)
+	_step_silt(delta)
 	queue_redraw()
 
 ## Log-scaled, hard-capped mapping from a (fake) population number to a
@@ -85,6 +93,12 @@ func _spawn_fish() -> Dictionary:
 	var angle := randf() * TAU
 	return {"pos": _random_position(), "vel": Vector2.RIGHT.rotated(angle) * FISH_GLIDE_SPEED, "dart_timer": randf_range(4.0, 9.0), "eat_cooldown": 0.0}
 
+## depth is a purely cosmetic 0-1 value (near 1 = shallow/bright/bigger,
+## near 0 = deep/dim/smaller) - a cheap depth cue independent of the
+## background shader's own depth fog.
+func _spawn_silt() -> Dictionary:
+	return {"pos": _random_position(), "drift_phase": randf() * TAU, "depth": randf()}
+
 func _random_position() -> Vector2:
 	return Vector2(randf() * size.x, randf() * size.y)
 
@@ -99,6 +113,17 @@ func _step_algae(delta: float) -> void:
 		var wobble := Vector2(sin(a.drift_phase), cos(a.drift_phase * 1.3)) * 2.0
 		a.pos += (current + wobble) * delta
 		_contain(a)
+
+## Silt drifts even more passively than algae (§7.1's spirit extended to
+## ambient debris) - slower current, no wobble bias toward anything, and
+## never interacts with predation or population counts.
+func _step_silt(delta: float) -> void:
+	var current := Vector2(sin(_time * 0.05), cos(_time * 0.04)) * 2.0
+	for s in _silt:
+		s.drift_phase += delta * 0.2
+		var wobble := Vector2(sin(s.drift_phase), cos(s.drift_phase * 0.7)) * 1.0
+		s.pos += (current + wobble) * delta * (0.4 + s.depth * 0.6)
+		_contain(s)
 
 ## Daphnia hop and jerk (§7.1) - discrete, erratic vertical bursts, not
 ## smooth drift. Hops bias toward the nearest algae in range (still with
@@ -201,7 +226,11 @@ func _contain(particle: Dictionary) -> void:
 			particle.vel.y = -absf(particle.vel.y)
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), WATER_COLOR)
+	for s in _silt:
+		var radius: float = lerpf(0.8, 2.2, s.depth)
+		var color := SILT_COLOR
+		color.a = lerpf(0.15, 0.4, s.depth)
+		draw_circle(s.pos, radius, color)
 	for a in _algae:
 		draw_circle(a.pos, 2.5, ALGAE_COLOR)
 	for d in _daphnia:
