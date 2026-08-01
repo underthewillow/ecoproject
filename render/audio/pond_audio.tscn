@@ -48,7 +48,7 @@ script = ExtResource("1")
 [node name="Drone" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_drone")
 volume_db = -1.0
-bus = &"PondAmbient"
+bus = &"PondFoundation"
 
 [node name="Voice1" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_voice1")
@@ -93,4 +93,4 @@ bus = &"PondAmbient"
 [node name="Bass" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_bass")
 volume_db = -5.0
-bus = &"PondAmbient"
+bus = &"PondFoundation"

@@ -38,6 +38,8 @@ extends Node
 const FakePondState = preload("res://render/fake_pond_state.gd")
 
 const MIX_RATE := 44100.0
+const MIX_BUS_NAME := "PondMix"
+const FOUNDATION_BUS_NAME := "PondFoundation"
 const AMBIENT_BUS_NAME := "PondAmbient"
 
 ## Minor pentatonic in just intonation: root, minor third, fourth,
@@ -107,15 +109,22 @@ const BASS_MIN_STEPS_BEFORE_TURN := 2
 const BASS_MAX_STEPS_BEFORE_TURN := 4
 const BASS_BLUE_NOTE_RATIO := 1.41421356  # equal-tempered tritone (b5) - deliberately not just intonation, since it's only ever a quick passing tone, never sustained
 const BASS_BLUE_NOTE_CHANCE := 0.18
+## Real passing tones are brief AND unaccented (music theory: non-chord
+## tones typically fall on a weak beat) - an earlier pass gave the blue
+## note the same sustain as every other bass note, so once the bass was
+## actually audible it rang out as a lingering clash rather than a quick
+## bluesy touch. It now always gets the soft ghost-note dynamic and its
+## own much faster decay.
+const BASS_BLUE_NOTE_DECAY_RATE := 6.5  # ~0.25s ring - brief, not sustained
 const BASS_ACCENT_AMP_MULT := 1.7  # "the one" - an accent on every turnaround
 const BASS_GHOST_CHANCE := 0.3
 const BASS_GHOST_AMP_MULT := 0.5  # a soft, mostly-textural note, funk's "ghost note"
 const BASS_NOTE_AMP := 0.10
 const BASS_ATTACK_TIME := 0.008
-const BASS_DECAY_RATE := 1.7  # warmer/rounder than a snappy pluck
+const BASS_DECAY_RATE := 1.4  # warm/rounder, slightly longer than a snappy pluck
 const BASS_FILTER_ENV_DECAY := 5.0  # the filter brightness fades over ~0.2s - independent of and quicker than the amplitude decay above, giving a soft "thump" onset rather than a sustained brightness
 const BASS_FILTER_MIN_CUTOFF := 0.02  # ~140Hz corner - the warm, dull resting tone
-const BASS_FILTER_MAX_CUTOFF := 0.08  # ~560Hz corner - a gentle brightness lift at the attack, not the aggressive sweep that read as a cartoon "boing" in the previous pass
+const BASS_FILTER_MAX_CUTOFF := 0.055  # ~385Hz corner - a gentle brightness lift at the attack, pulled back further for warmth
 
 var _time := 0.0
 
@@ -144,6 +153,7 @@ var _bass_timer := 0.0
 var _bass_filter_state := 0.0
 var _bass_filter_env := 0.0
 var _bass_amp_mult := 1.0
+var _bass_decay_rate := BASS_DECAY_RATE
 var _bass_degree_index := 0
 var _bass_direction := 1
 var _bass_steps_until_turn := 3
@@ -158,7 +168,7 @@ var _bass_next_is_accent := true
 
 func _ready() -> void:
 	randomize()
-	_ensure_ambient_bus()
+	_ensure_audio_buses()
 
 	_drone_player.play()
 	_drone_playback = _drone_player.get_stream_playback()
@@ -188,42 +198,68 @@ func _ready() -> void:
 	PondEvents.predation.connect(_on_predation)
 
 
-## Everything routes through one dedicated bus (not Master directly) so
-## the reverb/filter treatment is scoped to this ambient system and
-## won't color any unrelated audio a later phase might add. Idempotent -
-## safe to call every time the scene loads.
-func _ensure_ambient_bus() -> void:
-	if AudioServer.get_bus_index(AMBIENT_BUS_NAME) != -1:
+## Three buses instead of one, after feedback that the mix sounded
+## "muddy"/like "sustained feedback loops": a large reverb (the previous
+## pass used room_size 0.9, wet 0.4) fed by an always-on drone never
+## actually finishes decaying - the tail keeps getting replenished, so
+## it never resolves to silence, which is a real, well-documented
+## reverb characteristic and a plausible source of that "never stops"
+## impression, not necessarily a literal DSP bug. Research on ambient
+## mixing also flags this directly: reverb should be reserved for fewer
+## elements, with foundational/rhythmic material kept shorter and drier
+## to avoid mud - keeping bass out of a big reverb in particular is
+## close to universal mixing practice, since long tails smear rhythmic
+## definition.
+##
+## PondFoundation (drone + bass): a much smaller, shorter, drier reverb -
+## enough to feel like it's in the same room as everything else, not
+## enough to blur the pitch/rhythm they're there to anchor.
+## PondAmbient (pad voices + both chime types): the textural/melodic
+## wash, where a longer tail is appropriate - but room size and wet both
+## pulled back from the previous pass for warmth (a large hall reads as
+## cold/cavernous; a smaller room reads as warm/intimate), and damping
+## raised so the tail rounds off faster instead of ringing.
+## PondMix: both of the above feed into this, which just holds the
+## limiter - the final safety net has to see the fully combined signal
+## to do its job, so it can't live on either branch alone.
+## All idempotent - safe to call every time the scene loads.
+func _ensure_audio_buses() -> void:
+	if AudioServer.get_bus_index(MIX_BUS_NAME) != -1:
 		return
-	var idx := AudioServer.bus_count
-	AudioServer.add_bus(idx)
-	AudioServer.set_bus_name(idx, AMBIENT_BUS_NAME)
-	AudioServer.set_bus_send(idx, "Master")
 
-	var lowpass := AudioEffectLowPassFilter.new()
-	lowpass.cutoff_hz = 2600.0
-	AudioServer.add_bus_effect(idx, lowpass)
-
-	var reverb := AudioEffectReverb.new()
-	reverb.room_size = 0.9
-	reverb.damping = 0.65
-	reverb.spread = 1.0
-	reverb.wet = 0.4
-	reverb.dry = 1.0
-	AudioServer.add_bus_effect(idx, reverb)
-
-	# Every layer here is clamped individually before it ever reaches the
-	# bus, but that only protects each layer's OWN signal - it does
-	# nothing to stop several layers (e.g. 3 interaction voices + the
-	# bass pulse + a phrase note) from summing past 0dB once they're
-	# mixed together. A limiter as the final stage in the chain (after
-	# the reverb, so it catches the fully combined signal) means
-	# individual layer levels can be pushed for presence/loudness without
-	# risking real clipping distortion at the rare moments where several
-	# of them happen to peak together.
+	var mix_idx := AudioServer.bus_count
+	AudioServer.add_bus(mix_idx)
+	AudioServer.set_bus_name(mix_idx, MIX_BUS_NAME)
+	AudioServer.set_bus_send(mix_idx, "Master")
 	var limiter := AudioEffectLimiter.new()
 	limiter.ceiling_db = -1.0
-	AudioServer.add_bus_effect(idx, limiter)
+	AudioServer.add_bus_effect(mix_idx, limiter)
+
+	var foundation_idx := AudioServer.bus_count
+	AudioServer.add_bus(foundation_idx)
+	AudioServer.set_bus_name(foundation_idx, FOUNDATION_BUS_NAME)
+	AudioServer.set_bus_send(foundation_idx, MIX_BUS_NAME)
+	var foundation_reverb := AudioEffectReverb.new()
+	foundation_reverb.room_size = 0.25
+	foundation_reverb.damping = 0.7
+	foundation_reverb.wet = 0.15
+	foundation_reverb.dry = 1.0
+	AudioServer.add_bus_effect(foundation_idx, foundation_reverb)
+
+	var ambient_idx := AudioServer.bus_count
+	AudioServer.add_bus(ambient_idx)
+	AudioServer.set_bus_name(ambient_idx, AMBIENT_BUS_NAME)
+	AudioServer.set_bus_send(ambient_idx, MIX_BUS_NAME)
+	var lowpass := AudioEffectLowPassFilter.new()
+	lowpass.cutoff_hz = 2200.0
+	AudioServer.add_bus_effect(ambient_idx, lowpass)
+	var reverb := AudioEffectReverb.new()
+	reverb.room_size = 0.55
+	reverb.damping = 0.75
+	reverb.spread = 1.0
+	reverb.wet = 0.28
+	reverb.dry = 1.0
+	AudioServer.add_bus_effect(ambient_idx, reverb)
 
 
 static func _new_note_voice() -> Dictionary:
@@ -389,7 +425,7 @@ func _fill_bass() -> void:
 			continue
 		_bass_note.age += frame_dt
 		var attack: float = clampf(_bass_note.age / BASS_ATTACK_TIME, 0.0, 1.0)
-		var amp_envelope: float = attack * exp(-maxf(_bass_note.age - BASS_ATTACK_TIME, 0.0) * BASS_DECAY_RATE)
+		var amp_envelope: float = attack * exp(-maxf(_bass_note.age - BASS_ATTACK_TIME, 0.0) * _bass_decay_rate)
 		if amp_envelope < 0.0005 and _bass_note.age > BASS_ATTACK_TIME:
 			_bass_note.active = false
 
@@ -400,7 +436,7 @@ func _fill_bass() -> void:
 		var phase: float = _bass_note.phase
 		var triangle: float = (2.0 / PI) * asin(sin(phase * TAU))
 		var saw: float = 2.0 * (phase - floor(phase + 0.5))
-		var tone := triangle * 0.75 + saw * 0.25
+		var tone := triangle * 0.85 + saw * 0.15
 		_bass_filter_state += cutoff * (tone - _bass_filter_state)
 
 		var sample := _bass_filter_state * amp_envelope * BASS_NOTE_AMP * _bass_amp_mult
@@ -472,12 +508,21 @@ func _update_bass(delta: float) -> void:
 
 	var accent := _bass_next_is_accent
 	_bass_next_is_accent = false
-	if accent:
+	if use_blue_note:
+		# Passing tones are inherently weak/unaccented (music theory) and
+		# brief - never let this compete for attention the way an actual
+		# scale-degree note can.
+		_bass_amp_mult = BASS_GHOST_AMP_MULT
+		_bass_decay_rate = BASS_BLUE_NOTE_DECAY_RATE
+	elif accent:
 		_bass_amp_mult = BASS_ACCENT_AMP_MULT
+		_bass_decay_rate = BASS_DECAY_RATE
 	elif randf() < BASS_GHOST_CHANCE:
 		_bass_amp_mult = BASS_GHOST_AMP_MULT
+		_bass_decay_rate = BASS_DECAY_RATE
 	else:
 		_bass_amp_mult = 1.0
+		_bass_decay_rate = BASS_DECAY_RATE
 
 	_trigger_note(_bass_note, freq)
 	_bass_filter_env = 1.0

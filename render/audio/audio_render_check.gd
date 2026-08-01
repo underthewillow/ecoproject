@@ -126,9 +126,44 @@ func _process(delta: float) -> bool:
 			print("trigger_requested_at=%.4fs trigger_actually_fired_at=%.4fs measured_latency_ms=%.1f" % [
 				_trigger_at, _trigger_actual_time, latency_ms
 			])
+		_print_segment_trend(stream)
 		quit()
 		return true
 	return false
+
+
+## Splits the recording into thirds and reports RMS for each - a cheap
+## way to check whether a layer's energy is growing over time (which
+## would indicate genuine unbounded reverb buildup rather than settling
+## to a steady state) instead of just reasoning about it abstractly.
+## Most useful with --isolate=<layer> so the trend reflects one layer's
+## reverb behavior rather than the whole mix's.
+func _print_segment_trend(stream: AudioStreamWAV) -> void:
+	var bytes := stream.data
+	var total_samples := bytes.size() / 4
+	var third := total_samples / 3
+	if third <= 0:
+		return
+	var rms1 := _rms_in_range(bytes, 0, third)
+	var rms2 := _rms_in_range(bytes, third, third * 2)
+	var rms3 := _rms_in_range(bytes, third * 2, total_samples)
+	print("segment_rms first_third=%.4f middle_third=%.4f last_third=%.4f" % [rms1, rms2, rms3])
+
+
+func _rms_in_range(bytes: PackedByteArray, from_sample: int, to_sample: int) -> float:
+	var sum_sq := 0.0
+	var count := 0
+	var i := from_sample * 4
+	var end := mini(bytes.size() - 1, to_sample * 4)
+	while i + 1 < end:
+		var raw := bytes[i] | (bytes[i + 1] << 8)
+		if raw >= 32768:
+			raw -= 65536
+		var normalized := raw / 32768.0
+		sum_sq += normalized * normalized
+		count += 1
+		i += 4
+	return sqrt(sum_sq / maxf(float(count), 1.0))
 
 
 ## Scans forward from trigger_time for the first point that clearly
