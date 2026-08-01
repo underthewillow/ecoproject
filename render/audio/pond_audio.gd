@@ -80,21 +80,27 @@ const PHRASE_DECAY_RATE := 2.2  # ~1.8s ring-out, bowl-like sustain since these 
 ## than a beat behind it.
 const INTERACTION_VOICE_COUNT := 3
 const INTERACTION_OCTAVE := 3.0
-const INTERACTION_NOTE_AMP := 0.06
+const INTERACTION_NOTE_AMP := 0.11
 const INTERACTION_ATTACK_TIME := 0.012
 const INTERACTION_DECAY_RATE := 5.5  # ~0.7s ring - a soft droplet, not a sustained tone
 
 ## A steady, repeating low pulse - the one deliberately non-generative
 ## element, there to give a felt sense of time/groove while playing
 ## rather than pure floating ambience. Mostly root, with an occasional
-## lift to the fifth; plenty of rests so it reads as a pulse, not a bassline
-## melody.
+## lift to the fifth; plenty of rests so it reads as a pulse, not a
+## bassline melody. Deliberately timbrally distinct from every other
+## layer (see _fill_bass) - a filtered, plucked sawtooth rather than the
+## shared bowl tone, closer to a plucked bass guitar - even though it's
+## mixed quiet/subtle in level.
 const BASS_OCTAVE := 1.0
 const BASS_BEAT_INTERVAL := 0.9  # a slow, steady pulse - well under typical dance tempo
 const BASS_PATTERN_DEGREES: Array[int] = [0, -1, -1, -1, 0, -1, 3, -1]  # index into PENTATONIC_RATIOS; -1 = rest
-const BASS_NOTE_AMP := 0.11
-const BASS_ATTACK_TIME := 0.015
-const BASS_DECAY_RATE := 1.6  # a soft, felt pulse, not a percussive hit
+const BASS_NOTE_AMP := 0.14
+const BASS_ATTACK_TIME := 0.006  # snappy, plucked attack
+const BASS_DECAY_RATE := 2.4  # punchier than a sustained pad note
+const BASS_FILTER_ENV_DECAY := 7.0  # the filter brightness fades fast (~0.14s) - independent of and quicker than the amplitude decay above, which is what gives a plucked string its characteristic "twang that mellows"
+const BASS_FILTER_MIN_CUTOFF := 0.025  # ~175Hz corner - the dull, resting tone
+const BASS_FILTER_MAX_CUTOFF := 0.35  # ~2450Hz corner - the bright transient right at the pluck
 
 var _time := 0.0
 
@@ -121,6 +127,8 @@ var _bass_playback: AudioStreamGeneratorPlayback
 var _bass_note := _new_note_voice()
 var _bass_timer := 0.0
 var _bass_beat_index := 0
+var _bass_filter_state := 0.0
+var _bass_filter_env := 0.0
 
 @onready var _drone_player: AudioStreamPlayer = $Drone
 @onready var _voice_players: Array[AudioStreamPlayer] = [$Voice1, $Voice2, $Voice3, $Voice4]
@@ -184,6 +192,19 @@ func _ensure_ambient_bus() -> void:
 	reverb.wet = 0.4
 	reverb.dry = 1.0
 	AudioServer.add_bus_effect(idx, reverb)
+
+	# Every layer here is clamped individually before it ever reaches the
+	# bus, but that only protects each layer's OWN signal - it does
+	# nothing to stop several layers (e.g. 3 interaction voices + the
+	# bass pulse + a phrase note) from summing past 0dB once they're
+	# mixed together. A limiter as the final stage in the chain (after
+	# the reverb, so it catches the fully combined signal) means
+	# individual layer levels can be pushed for presence/loudness without
+	# risking real clipping distortion at the rare moments where several
+	# of them happen to peak together.
+	var limiter := AudioEffectLimiter.new()
+	limiter.ceiling_db = -1.0
+	AudioServer.add_bus_effect(idx, limiter)
 
 
 static func _new_note_voice() -> Dictionary:
@@ -329,11 +350,36 @@ func _fill_interaction() -> void:
 			playback.push_frame(Vector2(safe_sample, safe_sample))
 
 
+## Deliberately its own synthesis method, not _bowl_wave - a filtered
+## sawtooth instead of the shared additive bowl tone, so the bass reads
+## as a genuinely different instrument (closer to a plucked bass guitar)
+## rather than just a lower-pitched version of everything else. The
+## amplitude envelope (attack/decay) shapes loudness as usual, but the
+## filter cutoff has its OWN, faster-decaying envelope on top - bright
+## at the moment of the pluck, quickly duller - which is what actually
+## reads as "plucked string" rather than "sustained tone."
 func _fill_bass() -> void:
 	var frame_dt := 1.0 / MIX_RATE
 	var to_fill := _bass_playback.get_frames_available()
 	for i in to_fill:
-		var sample := _advance_note(_bass_note, frame_dt, BASS_ATTACK_TIME, BASS_DECAY_RATE) * BASS_NOTE_AMP
+		if not _bass_note.active:
+			_bass_playback.push_frame(Vector2.ZERO)
+			continue
+		_bass_note.age += frame_dt
+		var attack: float = clampf(_bass_note.age / BASS_ATTACK_TIME, 0.0, 1.0)
+		var amp_envelope: float = attack * exp(-maxf(_bass_note.age - BASS_ATTACK_TIME, 0.0) * BASS_DECAY_RATE)
+		if amp_envelope < 0.0005 and _bass_note.age > BASS_ATTACK_TIME:
+			_bass_note.active = false
+
+		_bass_filter_env = maxf(_bass_filter_env - BASS_FILTER_ENV_DECAY * frame_dt, 0.0)
+		var cutoff := lerpf(BASS_FILTER_MIN_CUTOFF, BASS_FILTER_MAX_CUTOFF, _bass_filter_env)
+
+		_bass_note.phase += float(_bass_note.freq) * frame_dt
+		var phase: float = _bass_note.phase
+		var saw: float = 2.0 * (phase - floor(phase + 0.5))
+		_bass_filter_state += cutoff * (saw - _bass_filter_state)
+
+		var sample := _bass_filter_state * amp_envelope * BASS_NOTE_AMP
 		var safe_sample := clampf(sample, -1.0, 1.0)
 		_bass_playback.push_frame(Vector2(safe_sample, safe_sample))
 
@@ -381,6 +427,7 @@ func _update_bass(delta: float) -> void:
 	_bass_beat_index += 1
 	if degree >= 0:
 		_trigger_note(_bass_note, ROOT_FREQ * PENTATONIC_RATIOS[degree] * BASS_OCTAVE)
+		_bass_filter_env = 1.0
 
 
 func _trigger_note(note: Dictionary, freq: float) -> void:
