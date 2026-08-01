@@ -27,6 +27,13 @@ const SERIES := [
 	{"field": "detritus", "color": Color.SANDY_BROWN},
 	{"field": "daphnia", "color": Color.GOLD},
 	{"field": "fish", "color": Color.ORCHID},
+	# Mean daphnia body size (§4.2) - the actual quantity Phase 4's
+	# acceptance criterion is measured on: does it fall when fish are
+	# present and recover when they're removed? Each series here
+	# auto-scales independently (see _draw_series), so this reads
+	# correctly regardless of its absolute range relative to the
+	# population-count series above it.
+	{"field": "daphnia_mean_size", "color": Color.CRIMSON},
 ]
 
 var _sim: SimCore

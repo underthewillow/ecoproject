@@ -19,9 +19,20 @@ var algae: float = 0.0
 var nutrients: float = 0.0
 var detritus: float = 0.0
 
-## Single-body-size population for Phase 2 (§8) - a scalar, not yet the
-## trait-binned distribution §4 introduces in Phase 4.
+## Daphnia's trait-binned population (§4). `daphnia` is the scalar total
+## across every bin — kept for anything that only needs total biomass
+## (mass-conservation checks, the old Phase 2/3 harness prints).
+## `daphnia_mean_size` is the population-weighted mean body size — the
+## quantity §4.2's acceptance criterion is actually measured on: does it
+## fall when fish are present and recover when they're removed?
+## `daphnia_bins` is a plain copy of the per-bin densities, for anything
+## that needs the full distribution (e.g. confirming it hasn't collapsed
+## onto a single bin). All three are derived from the sim's internal
+## TraitBinPopulation each tick — this snapshot never holds that live
+## object itself, matching the no-live-references rule above.
 var daphnia: float = 0.0
+var daphnia_mean_size: float = 0.0
+var daphnia_bins: Array[float] = []
 
 ## Fish population for Phase 3 (§8) - a scalar; fish never evolve (§3.3).
 var fish: float = 0.0
@@ -42,6 +53,8 @@ func duplicate_state() -> RefCounted:
 	copy.nutrients = nutrients
 	copy.detritus = detritus
 	copy.daphnia = daphnia
+	copy.daphnia_mean_size = daphnia_mean_size
+	copy.daphnia_bins = daphnia_bins.duplicate()
 	copy.fish = fish
 	copy.respired = respired
 	return copy
