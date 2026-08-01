@@ -245,6 +245,13 @@ func _ensure_audio_buses() -> void:
 	foundation_reverb.wet = 0.15
 	foundation_reverb.dry = 1.0
 	AudioServer.add_bus_effect(foundation_idx, foundation_reverb)
+	# Make-up gain on the bus itself (not each individual player) so the
+	# whole branch gets louder as one unit without disturbing the
+	# relative balance already tuned between its own layers. Applied
+	# before PondMix's limiter, so the safety net still catches whatever
+	# this produces - repeated "still too quiet" feedback across several
+	# passes means it's safe to be generous here.
+	AudioServer.set_bus_volume_db(foundation_idx, 6.0)
 
 	var ambient_idx := AudioServer.bus_count
 	AudioServer.add_bus(ambient_idx)
@@ -260,6 +267,7 @@ func _ensure_audio_buses() -> void:
 	reverb.wet = 0.28
 	reverb.dry = 1.0
 	AudioServer.add_bus_effect(ambient_idx, reverb)
+	AudioServer.set_bus_volume_db(ambient_idx, 6.0)
 
 
 static func _new_note_voice() -> Dictionary:
