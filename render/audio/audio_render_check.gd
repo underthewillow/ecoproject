@@ -26,6 +26,11 @@ extends SceneTree
 ## --scene=res://render/audio/pond_audio.tscn, which has no ongoing
 ## predation activity of its own to obscure the single manual trigger.
 
+const ALL_LAYER_NAMES: Array[String] = [
+	"Drone", "Voice1", "Voice2", "Voice3", "Voice4", "PhraseChime",
+	"InteractionChime1", "InteractionChime2", "InteractionChime3", "Bass",
+]
+
 var _elapsed := 0.0
 var _duration := 25.0
 var _out_path := "user://sanity_check.wav"
@@ -36,6 +41,7 @@ var _pond_events: Node
 var _trigger_at := -1.0
 var _trigger_fired := false
 var _trigger_actual_time := -1.0
+var _isolate: String = ""
 
 
 func _initialize() -> void:
@@ -48,6 +54,8 @@ func _initialize() -> void:
 			_scene_path = arg.substr("--scene=".length())
 		elif arg.begins_with("--trigger-at="):
 			_trigger_at = float(arg.substr("--trigger-at=".length()))
+		elif arg.begins_with("--isolate="):
+			_isolate = arg.substr("--isolate=".length())
 
 	var bus_idx := AudioServer.get_bus_index("Master")
 	_record = AudioEffectRecord.new()
@@ -66,7 +74,9 @@ func _initialize() -> void:
 	# _fill_interaction/_on_predation) with everything else silenced
 	# externally, rather than baking test-only behavior into pond_audio.gd.
 	if _trigger_at >= 0.0:
-		_mute_non_interaction_layers(instance)
+		_mute_all_except(instance, ["InteractionChime1", "InteractionChime2", "InteractionChime3"])
+	elif not _isolate.is_empty():
+		_mute_all_except(instance, _isolate.split(","))
 
 	# Referencing the PondEvents autoload by its global script name doesn't
 	# compile inside a custom SceneTree override script the way it does
@@ -76,15 +86,20 @@ func _initialize() -> void:
 	_pond_events.predation.connect(func(_level): _predation_count += 1)
 
 
-func _mute_non_interaction_layers(scene_instance: Node) -> void:
+## Silences every named layer except those in keep_names - used to
+## measure one layer's contribution in isolation (--isolate=Bass) or to
+## clear the background for a latency measurement (--trigger-at). volume_db,
+## not .stop() - stopping would tear down the playback object pond_audio.gd
+## is still holding a reference to and pushing frames into every frame,
+## risking a runtime error. Silencing via volume leaves everything running
+## normally, just inaudible.
+func _mute_all_except(scene_instance: Node, keep_names: Array) -> void:
 	var pond_audio := scene_instance if scene_instance.name == "PondAudio" else scene_instance.find_child("PondAudio", true, false)
 	if pond_audio == null:
 		return
-	# volume_db, not .stop() - stopping would tear down the playback
-	# object pond_audio.gd is still holding a reference to and pushing
-	# frames into every frame, risking a runtime error. Silencing via
-	# volume leaves everything running normally, just inaudible.
-	for player_name in ["Drone", "Voice1", "Voice2", "Voice3", "Voice4", "PhraseChime", "Bass"]:
+	for player_name in ALL_LAYER_NAMES:
+		if player_name in keep_names:
+			continue
 		var player: AudioStreamPlayer = pond_audio.get_node_or_null(player_name)
 		if player:
 			player.volume_db = -80.0
