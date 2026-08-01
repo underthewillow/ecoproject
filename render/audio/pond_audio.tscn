@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://render/audio/pond_audio.gd" id="1"]
 
@@ -26,7 +26,19 @@ buffer_length = 0.5
 mix_rate = 44100.0
 buffer_length = 0.5
 
-[sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_interaction"]
+[sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_interaction1"]
+mix_rate = 44100.0
+buffer_length = 0.5
+
+[sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_interaction2"]
+mix_rate = 44100.0
+buffer_length = 0.5
+
+[sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_interaction3"]
+mix_rate = 44100.0
+buffer_length = 0.5
+
+[sub_resource type="AudioStreamGenerator" id="AudioStreamGenerator_bass"]
 mix_rate = 44100.0
 buffer_length = 0.5
 
@@ -35,35 +47,50 @@ script = ExtResource("1")
 
 [node name="Drone" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_drone")
-volume_db = -8.0
+volume_db = -4.0
 bus = &"PondAmbient"
 
 [node name="Voice1" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_voice1")
-volume_db = -10.0
+volume_db = -6.0
 bus = &"PondAmbient"
 
 [node name="Voice2" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_voice2")
-volume_db = -10.0
+volume_db = -6.0
 bus = &"PondAmbient"
 
 [node name="Voice3" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_voice3")
-volume_db = -10.0
+volume_db = -6.0
 bus = &"PondAmbient"
 
 [node name="Voice4" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_voice4")
-volume_db = -10.0
+volume_db = -6.0
 bus = &"PondAmbient"
 
 [node name="PhraseChime" type="AudioStreamPlayer" parent="."]
 stream = SubResource("AudioStreamGenerator_phrase")
+volume_db = -3.0
+bus = &"PondAmbient"
+
+[node name="InteractionChime1" type="AudioStreamPlayer" parent="."]
+stream = SubResource("AudioStreamGenerator_interaction1")
 volume_db = -6.0
 bus = &"PondAmbient"
 
-[node name="InteractionChime" type="AudioStreamPlayer" parent="."]
-stream = SubResource("AudioStreamGenerator_interaction")
-volume_db = -10.0
+[node name="InteractionChime2" type="AudioStreamPlayer" parent="."]
+stream = SubResource("AudioStreamGenerator_interaction2")
+volume_db = -6.0
+bus = &"PondAmbient"
+
+[node name="InteractionChime3" type="AudioStreamPlayer" parent="."]
+stream = SubResource("AudioStreamGenerator_interaction3")
+volume_db = -6.0
+bus = &"PondAmbient"
+
+[node name="Bass" type="AudioStreamPlayer" parent="."]
+stream = SubResource("AudioStreamGenerator_bass")
+volume_db = -3.0
 bus = &"PondAmbient"

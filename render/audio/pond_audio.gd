@@ -4,34 +4,23 @@ extends Node
 ## Nothing here is a pre-rendered clip; every sound is synthesized in
 ## real time via AudioStreamGenerator.
 ##
-## Aesthetic target (v4, after listening feedback on passes 1-3):
-## meditation/singing-bowl ambient. Grounded in actual research this
-## time rather than guessing (see commit message for sources):
-##  - Minor pentatonic (root/b3/4/5/b7) is the standard "safe" scale for
-##    ambient/meditative music - it skips semitone-adjacent degrees (the
-##    harshest clash) while still allowing real melodic movement, unlike
-##    v3's octaves-and-fifths-only chord, which was safe but static.
-##  - Real singing bowls have INHARMONIC overtones (non-integer ratios,
-##    commonly cited around 2.76x/5.02x/8.2x the fundamental) - not the
-##    clean integer harmonics v3 used, which is exactly what read as a
-##    cheap synth/FM-bell patch. _bowl_wave below uses inharmonic ratios
-##    instead.
-##  - Calming low-frequency material sits around 20-250Hz; singing bowl
-##    fundamentals are commonly cited around 200-300Hz. v3's root (110Hz)
-##    plus chimes sitting 2 octaves above that (400-900Hz+) was well
-##    above the register this genre actually lives in. Root is now
-##    lower, and each layer occupies a distinct, moderate register
-##    instead of reaching high.
-##  - Ambient production leans on long reverb (5-10s decay, ~50-70% wet
-##    is a typical starting point) and low-pass filtering to round off
-##    harsh highs - dry, unfiltered synthesis reads as cheap regardless
-##    of note choice. Added a dedicated bus with both.
+## Aesthetic target: meditation/singing-bowl ambient. Grounded in actual
+## research (see commit history for sources): minor pentatonic
+## (root/b3/4/5/b7) as the standard "safe" ambient scale; real singing
+## bowls have INHARMONIC overtones (non-integer ratios, ~2.76x/5.02x/
+## 8.2x) rather than clean harmonics; calming material sits in a low
+## register (~20-250Hz); ambient production leans on long reverb and
+## low-pass filtering, without which synthesis reads as cheap regardless
+## of note choice.
 ##
-## The generative design is still Eno-esque: Music for Airports was
-## built from ~22 tape loops of differing physical lengths, cycling
+## The generative design is Eno-esque: Music for Airports was built from
+## ~22 tape loops of differing physical lengths, cycling
 ## "incommensurably" (never resyncing) - the same independent,
-## non-synchronized-timer idea already used here for the pad voices and
-## phrase generator.
+## non-synchronized-timer idea used here for the pad voices and phrase
+## generator. The bassline (added after the "give it a groove" request)
+## is the one deliberately repeating element - a steady rhythmic anchor
+## underneath everything else, which is a common ambient/downtempo
+## structure (static pulse + evolving texture on top).
 ##
 ## Reads FakePondState the same way look_study.gd does and writes
 ## nothing back - fully decoupled from the renderer, standing in for
@@ -54,7 +43,7 @@ const AMBIENT_BUS_NAME := "PondAmbient"
 ## fifth, minor seventh. No semitone-adjacent degrees anywhere (the
 ## harshest possible clash is structurally impossible), while still
 ## being a real scale with melodic color rather than a static chord.
-const ROOT_FREQ := 55.0  # A1 - a full octave-plus lower than v3's root
+const ROOT_FREQ := 55.0  # A1
 const PENTATONIC_RATIOS: Array[float] = [1.0, 6.0 / 5.0, 4.0 / 3.0, 3.0 / 2.0, 9.0 / 5.0]
 const LOW_PENTATONIC_RATIOS: Array[float] = [1.0, 6.0 / 5.0, 4.0 / 3.0]
 const HIGH_PENTATONIC_RATIOS: Array[float] = [4.0 / 3.0, 3.0 / 2.0, 9.0 / 5.0]
@@ -63,13 +52,13 @@ const HIGH_PENTATONIC_RATIOS: Array[float] = [4.0 / 3.0, 3.0 / 2.0, 9.0 / 5.0]
 ## pitch, that's what makes it a drone. Only the detuned pair's slow
 ## beating gives it any movement at all.
 const DRONE_DETUNE_CENTS := 4.0
-const DRONE_AMPLITUDE := 0.045
+const DRONE_AMPLITUDE := 0.06
 
 const VOICE_COUNT := 4
 const VOICE_MIN_CYCLE := 18.0
 const VOICE_MAX_CYCLE := 40.0
 const VOICE_OCTAVE := 1.0
-const VOICE_PEAK_AMP := 0.07
+const VOICE_PEAK_AMP := 0.10
 
 const PHRASE_MIN_INTERVAL := 7.0
 const PHRASE_MAX_INTERVAL := 15.0
@@ -78,21 +67,34 @@ const PHRASE_MAX_NOTES := 4
 const PHRASE_NOTE_GAP := 0.55  # meditative pace, not a quick arpeggio
 const PHRASE_OCTAVE := 2.0  # one register above the pad voices
 const PHRASE_STEP_WEIGHTS: Array[int] = [-1, 0, 0, 1]  # mild bias toward holding/stepping over leaping
-const PHRASE_NOTE_AMP := 0.09
+const PHRASE_NOTE_AMP := 0.12
+const PHRASE_ATTACK_TIME := 0.05  # soft rise - these aren't tied to a visible instant, so a gentle swell-in is fine
 const PHRASE_DECAY_RATE := 2.2  # ~1.8s ring-out, bowl-like sustain since these are rare
 
-## Interaction chimes fire close to every predation event now (a short
-## cooldown mostly just prevents true same-instant double-triggers), so
-## each one needs to be much quieter and shorter than a phrase note or
-## a busy ecosystem would turn into a wall of sound instead of a gentle
-## trickle.
+## Interaction chimes: one voice per concurrent predation event (round
+## robin across INTERACTION_VOICE_COUNT voices) rather than a single
+## gated voice - a single voice with a cooldown was silently dropping
+## any event that arrived while the previous one was still cooling down,
+## which is why not every visible eat produced a sound. Tight attack
+## time so the chime feels tied to the instant the eat happens rather
+## than a beat behind it.
+const INTERACTION_VOICE_COUNT := 3
 const INTERACTION_OCTAVE := 3.0
-const INTERACTION_COOLDOWN_MIN := 0.35
-const INTERACTION_COOLDOWN_MAX := 0.6
-const INTERACTION_NOTE_AMP := 0.045
+const INTERACTION_NOTE_AMP := 0.06
+const INTERACTION_ATTACK_TIME := 0.012
 const INTERACTION_DECAY_RATE := 5.5  # ~0.7s ring - a soft droplet, not a sustained tone
 
-const NOTE_ATTACK_TIME := 0.05  # smooth rise - long enough that no retrigger ever clicks
+## A steady, repeating low pulse - the one deliberately non-generative
+## element, there to give a felt sense of time/groove while playing
+## rather than pure floating ambience. Mostly root, with an occasional
+## lift to the fifth; plenty of rests so it reads as a pulse, not a bassline
+## melody.
+const BASS_OCTAVE := 1.0
+const BASS_BEAT_INTERVAL := 0.9  # a slow, steady pulse - well under typical dance tempo
+const BASS_PATTERN_DEGREES: Array[int] = [0, -1, -1, -1, 0, -1, 3, -1]  # index into PENTATONIC_RATIOS; -1 = rest
+const BASS_NOTE_AMP := 0.11
+const BASS_ATTACK_TIME := 0.015
+const BASS_DECAY_RATE := 1.6  # a soft, felt pulse, not a percussive hit
 
 var _time := 0.0
 
@@ -111,14 +113,20 @@ var _phrase_timer := 0.0
 var _pending_phrase_notes: Array[float] = []
 var _next_phrase_note_timer := 0.0
 
-var _interaction_playback: AudioStreamGeneratorPlayback
-var _interaction_note := _new_note_voice()
-var _interaction_cooldown := 0.0
+var _interaction_playbacks: Array[AudioStreamGeneratorPlayback] = []
+var _interaction_notes: Array[Dictionary] = []
+var _interaction_next_voice := 0
+
+var _bass_playback: AudioStreamGeneratorPlayback
+var _bass_note := _new_note_voice()
+var _bass_timer := 0.0
+var _bass_beat_index := 0
 
 @onready var _drone_player: AudioStreamPlayer = $Drone
 @onready var _voice_players: Array[AudioStreamPlayer] = [$Voice1, $Voice2, $Voice3, $Voice4]
 @onready var _phrase_player: AudioStreamPlayer = $PhraseChime
-@onready var _interaction_player: AudioStreamPlayer = $InteractionChime
+@onready var _interaction_players: Array[AudioStreamPlayer] = [$InteractionChime1, $InteractionChime2, $InteractionChime3]
+@onready var _bass_player: AudioStreamPlayer = $Bass
 
 
 func _ready() -> void:
@@ -141,8 +149,14 @@ func _ready() -> void:
 	_phrase_playback = _phrase_player.get_stream_playback()
 	_phrase_timer = randf_range(PHRASE_MIN_INTERVAL, PHRASE_MAX_INTERVAL)
 
-	_interaction_player.play()
-	_interaction_playback = _interaction_player.get_stream_playback()
+	for i in INTERACTION_VOICE_COUNT:
+		var player := _interaction_players[i]
+		player.play()
+		_interaction_playbacks.append(player.get_stream_playback())
+		_interaction_notes.append(_new_note_voice())
+
+	_bass_player.play()
+	_bass_playback = _bass_player.get_stream_playback()
 
 	PondEvents.predation.connect(_on_predation)
 
@@ -192,10 +206,9 @@ func _pick_tone(pool: Array[float], octave: float) -> float:
 
 ## Two quiet, slightly-inharmonic partials on top of the fundamental -
 ## a cheap approximation of a bowl's non-integer overtone spectrum
-## (research-cited ratios ~2.76x and ~5.02x) instead of the clean
-## integer harmonics used in the previous pass, which read as a
-## synthetic FM-bell patch rather than something organic. Output is
-## normalized back to roughly +-1 peak.
+## (research-cited ratios ~2.76x and ~5.02x) instead of clean integer
+## harmonics, which read as a synthetic FM-bell patch rather than
+## something organic. Output is normalized back to roughly +-1 peak.
 static func _bowl_wave(phase_turns: float) -> float:
 	var t := phase_turns * TAU
 	return (sin(t) + 0.14 * sin(t * 2.756) + 0.07 * sin(t * 5.017)) / 1.21
@@ -207,15 +220,16 @@ func _process(delta: float) -> void:
 	_fill_voices()
 	_fill_phrase()
 	_fill_interaction()
+	_fill_bass()
 	_update_phrase_timer(delta)
-	_interaction_cooldown = maxf(_interaction_cooldown - delta, 0.0)
+	_update_bass(delta)
 
 
 ## Two drone tones (root and fifth), each a pair of oscillators detuned
 ## by a few cents so they beat slowly against each other - the closest
 ## cheap approximation of a bowl's natural, ever-so-slightly-shifting
-## hum, instead of a static tone. Always on, very quiet - a cushion, not
-## a presence. Balance between root and fifth drifts gently with fake
+## hum, instead of a static tone. Always on, quiet - a cushion, not a
+## presence. Balance between root and fifth drifts gently with fake
 ## ecosystem health. Pitch itself never changes - a drone stays put.
 func _fill_drone() -> void:
 	var to_fill := _drone_playback.get_frames_available()
@@ -271,21 +285,23 @@ func _fill_voices() -> void:
 
 ## Shared per-sample envelope for a single retriggerable note voice - a
 ## short smoothed attack (never an instant jump, which is what produced
-## the clicking/"clipping" in an earlier pass) followed by an
-## exponential decay. Envelope is a pure function of note.age, which
-## resets to 0 on every trigger, so it always starts from true silence -
-## continuous even if a new note interrupts one still ringing.
-## decay_rate is passed in per-voice so phrase notes can ring longer
-## than the much more frequent, deliberately subtler interaction notes.
-static func _advance_note(note: Dictionary, frame_dt: float, decay_rate: float) -> float:
+## clicking/"clipping" in an earlier pass) followed by an exponential
+## decay. Envelope is a pure function of note.age, which resets to 0 on
+## every trigger, so it always starts from true silence - continuous
+## even if a new note interrupts one still ringing. attack_time and
+## decay_rate are passed in per-voice-type: interaction notes get a much
+## tighter attack (feels tied to the instant of the event) and a shorter
+## ring than phrase notes (which are rarer and can afford to be more
+## spacious).
+static func _advance_note(note: Dictionary, frame_dt: float, attack_time: float, decay_rate: float) -> float:
 	if not note.active:
 		return 0.0
 	note.age += frame_dt
-	var attack: float = clampf(note.age / NOTE_ATTACK_TIME, 0.0, 1.0)
-	var decay: float = exp(-maxf(note.age - NOTE_ATTACK_TIME, 0.0) * decay_rate)
+	var attack: float = clampf(note.age / attack_time, 0.0, 1.0)
+	var decay: float = exp(-maxf(note.age - attack_time, 0.0) * decay_rate)
 	var envelope := attack * decay
 	note.phase += note.freq * frame_dt
-	if envelope < 0.0005 and note.age > NOTE_ATTACK_TIME:
+	if envelope < 0.0005 and note.age > attack_time:
 		note.active = false
 		return 0.0
 	return _bowl_wave(note.phase) * envelope
@@ -295,18 +311,31 @@ func _fill_phrase() -> void:
 	var frame_dt := 1.0 / MIX_RATE
 	var to_fill := _phrase_playback.get_frames_available()
 	for i in to_fill:
-		var sample := _advance_note(_phrase_note, frame_dt, PHRASE_DECAY_RATE) * PHRASE_NOTE_AMP
+		var sample := _advance_note(_phrase_note, frame_dt, PHRASE_ATTACK_TIME, PHRASE_DECAY_RATE) * PHRASE_NOTE_AMP
 		var safe_sample := clampf(sample, -1.0, 1.0)
 		_phrase_playback.push_frame(Vector2(safe_sample, safe_sample))
 
 
+## One buffer per interaction voice, each independently advancing its
+## own note - see _on_predation for how voices get assigned.
 func _fill_interaction() -> void:
 	var frame_dt := 1.0 / MIX_RATE
-	var to_fill := _interaction_playback.get_frames_available()
+	for vi in _interaction_notes.size():
+		var playback := _interaction_playbacks[vi]
+		var to_fill := playback.get_frames_available()
+		for i in to_fill:
+			var sample := _advance_note(_interaction_notes[vi], frame_dt, INTERACTION_ATTACK_TIME, INTERACTION_DECAY_RATE) * INTERACTION_NOTE_AMP
+			var safe_sample := clampf(sample, -1.0, 1.0)
+			playback.push_frame(Vector2(safe_sample, safe_sample))
+
+
+func _fill_bass() -> void:
+	var frame_dt := 1.0 / MIX_RATE
+	var to_fill := _bass_playback.get_frames_available()
 	for i in to_fill:
-		var sample := _advance_note(_interaction_note, frame_dt, INTERACTION_DECAY_RATE) * INTERACTION_NOTE_AMP
+		var sample := _advance_note(_bass_note, frame_dt, BASS_ATTACK_TIME, BASS_DECAY_RATE) * BASS_NOTE_AMP
 		var safe_sample := clampf(sample, -1.0, 1.0)
-		_interaction_playback.push_frame(Vector2(safe_sample, safe_sample))
+		_bass_playback.push_frame(Vector2(safe_sample, safe_sample))
 
 
 ## Free-running generative phrase (§8) - the Bloom/Reflection-style
@@ -340,6 +369,20 @@ func _queue_phrase() -> void:
 	_next_phrase_note_timer = 0.0
 
 
+## The one deliberately repeating element (§8 exception, noted above) -
+## a steady low pulse so the piece has a felt sense of time while
+## playing, underneath the otherwise non-repeating generative layers.
+func _update_bass(delta: float) -> void:
+	_bass_timer += delta
+	if _bass_timer < BASS_BEAT_INTERVAL:
+		return
+	_bass_timer -= BASS_BEAT_INTERVAL
+	var degree: int = BASS_PATTERN_DEGREES[_bass_beat_index % BASS_PATTERN_DEGREES.size()]
+	_bass_beat_index += 1
+	if degree >= 0:
+		_trigger_note(_bass_note, ROOT_FREQ * PENTATONIC_RATIOS[degree] * BASS_OCTAVE)
+
+
 func _trigger_note(note: Dictionary, freq: float) -> void:
 	note.freq = freq
 	note.age = 0.0
@@ -347,21 +390,22 @@ func _trigger_note(note: Dictionary, freq: float) -> void:
 
 
 ## Cosmetic predation events (look_study.gd, via the PondEvents autoload)
-## feed a second, independent note source - close to every interaction
-## now (the cooldown is only ~0.35-0.6s, mostly guarding against true
-## same-instant double-triggers), mapped to register by trophic level
-## (small predation = lower end of the scale, bigger predation =
-## higher) so there's a loose, intuitive sense to which notes show up
-## when. Combined with the free-running phrase generator above, this is
-## the "melody spontaneously forms from interactions" layer - two
-## unrelated note sources, always consonant because both draw from the
-## same pentatonic scale, occasionally landing near each other in time.
+## feed a second, independent note source, one per event via round-robin
+## voice assignment (see INTERACTION_VOICE_COUNT) rather than a single
+## gated voice - a shared cooldown was silently dropping events that
+## arrived close together, which is why not every visible eat used to
+## produce a sound. Mapped to register by trophic level (small predation
+## = lower end of the scale, bigger predation = higher) so there's a
+## loose, intuitive sense to which notes show up when. Combined with the
+## free-running phrase generator above, this is the "melody spontaneously
+## forms from interactions" layer - two unrelated note sources, always
+## consonant because both draw from the same pentatonic scale,
+## occasionally landing near each other in time.
 func _on_predation(trophic_level: int) -> void:
-	if _interaction_cooldown > 0.0:
-		return
-	_interaction_cooldown = randf_range(INTERACTION_COOLDOWN_MIN, INTERACTION_COOLDOWN_MAX)
 	var pool := HIGH_PENTATONIC_RATIOS if trophic_level >= 1 else LOW_PENTATONIC_RATIOS
-	_trigger_note(_interaction_note, _pick_tone(pool, INTERACTION_OCTAVE))
+	var voice_index := _interaction_next_voice
+	_interaction_next_voice = (_interaction_next_voice + 1) % _interaction_notes.size()
+	_trigger_note(_interaction_notes[voice_index], _pick_tone(pool, INTERACTION_OCTAVE))
 
 
 ## Manual trigger, kept for Phase 6: once real sim events exist they can
