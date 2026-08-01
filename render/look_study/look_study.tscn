@@ -16,7 +16,22 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="WaterBackground" type="ColorRect" parent="."]
+[node name="LowResCanvas" type="SubViewportContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+stretch = true
+stretch_shrink = 4
+
+[node name="LowResViewport" type="SubViewport" parent="LowResCanvas"]
+handle_input_locally = false
+size = Vector2i(288, 162)
+render_target_update_mode = 4
+
+[node name="WaterBackground" type="ColorRect" parent="LowResCanvas/LowResViewport"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -26,7 +41,7 @@ grow_vertical = 2
 color = Color(1, 1, 1, 1)
 material = SubResource("1")
 
-[node name="Particles" type="Control" parent="."]
+[node name="Particles" type="Control" parent="LowResCanvas/LowResViewport"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

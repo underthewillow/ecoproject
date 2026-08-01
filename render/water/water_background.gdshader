@@ -14,9 +14,15 @@ shader_type canvas_item;
 // construction, and an actual illustrated caustic pattern rather than
 // statistical noise, so it's sampled once (scrolled slowly for motion)
 // and thresholded by luminance, not multiplied against a second sample.
+//
+// Full pixel-art commitment: this node now renders inside a low-res
+// SubViewport (see look_study.tscn) that gets nearest-neighbor upscaled
+// to fill the window, so the tile is sampled with filter_nearest (crisp,
+// no blur) and tiled at close to its native 32px pixel density instead
+// of being stretched to cover the whole (much larger) window.
 
 uniform float time_scale : hint_range(0.0, 2.0) = 0.3;
-uniform sampler2D caustic_tex : source_color, repeat_enable, filter_linear;
+uniform sampler2D caustic_tex : source_color, repeat_enable, filter_nearest;
 
 vec3 screen_blend(vec3 base, vec3 light) {
 	return 1.0 - (1.0 - base) * (1.0 - light);
@@ -33,12 +39,15 @@ void fragment() {
 	vec3 base = mix(shallow_color, deep_color, uv.y);
 
 	// Caustics: one slowly-scrolling sample of the generated caustic tile,
-	// close to a 1:1 screen scale (not tiled multiple times across the
-	// frame - that was the visible grid artifact from an earlier pass).
-	// Threshold by luminance so only the brightest part of the illustrated
-	// pattern shows, rather than blending its own water-colored background
-	// on top of ours.
-	vec2 caustic_uv = uv * 1.2 + vec2(t * 0.03, t * 0.02);
+	// tiled at close to its native 32px pixel density across the low-res
+	// canvas (288x162 -> ~9x5 repeats), not stretched to fill it - that
+	// stretching (and, before this pass, sampling at 1:1 canvas scale
+	// against a much larger non-pixel-art window) is what caused a
+	// visible tiling grid and blur in earlier attempts. Threshold by
+	// luminance so only the brightest part of the illustrated pattern
+	// shows, rather than blending its own water-colored background on
+	// top of ours.
+	vec2 caustic_uv = uv * vec2(9.0, 5.0) + vec2(t * 0.3, t * 0.2);
 	vec3 caustic_sample = texture(caustic_tex, caustic_uv).rgb;
 	float luminance = dot(caustic_sample, vec3(0.299, 0.587, 0.114));
 	float caustic_strength = 1.0 - uv.y * 0.85;
