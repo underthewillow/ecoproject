@@ -46,16 +46,26 @@ sim/                         Track A — headless simulation core
                                 grazing, fish predation, mass-conserving flows end to end
     sim_config.gd               Tunable parameters (one object per run, so the sweep
                                 harness can override values without touching sim_core.gd)
-    sim_state.gd                Plain state snapshot (algae/nutrients/detritus/daphnia/fish)
+    sim_state.gd                Plain state snapshot (algae/nutrients/detritus/daphnia/fish,
+                                plus daphnia's mean body size and per-bin distribution)
     sim_rng.gd                   Seeded RNG — same seed always produces the same run
+    trait_bin_population.gd     Generic trait-binned population (bins, mean-trait tracking,
+                                offspring redistribution) — species-agnostic; daphnia's
+                                size-dependent ecology sits on top of this in sim_core.gd
   harness/                    Headless verification scripts (run via `godot --headless -s`)
     determinism_check.gd        Same seed -> bit-identical output
     equilibrium_check.gd        Algae alone reaches and holds a stable equilibrium
+    mass_conservation_check.gd  Total mass stays exactly constant across a full run
     sweep_phase2.gd              Grid-search daphnia/algae params for sustained oscillation
     phase2_validate.gd          Confirms the chosen combo holds over a full ~90 sim-min run
     sweep_phase3.gd              Grid-search fish params for three-trophic-level persistence
     phase3_validate.gd          Confirms the chosen combo across 20 seeds
-  species/                    Reserved for Phase 4 (trait-bin evolution) — currently empty
+    sweep_phase4.gd              Grid-search daphnia's size-dependent exponents, scored by
+                                the mean-size gap between with-fish and without-fish runs
+    phase4_validate.gd          Confirms the chosen combo across seeds and full duration,
+                                including a single run that introduces then removes fish
+  species/                    Currently empty — reserved for a possible future species
+                                beyond daphnia/fish/algae; see docs/pond-prototype-plan.md §9
 
 scenes/
   debug_chart.tscn / .gd      Track A's live line chart of raw sim state - no styling,
@@ -90,23 +100,30 @@ project.godot                 Godot project config; also registers the pond_even
 
 ## Track A status
 
-Phases 0-3 are implemented and passing their headless acceptance checks: deterministic
-core, algae-alone equilibrium, sustained daphnia/algae predator-prey oscillation, and
-three-trophic-level persistence (algae → daphnia → fish) — each validated over a full
-~90 simulated-minute run, not just a short exploratory window. Phase 4 (trait-bin
-evolution) and Phase 5 (the player-facing setup layer) haven't started.
+Phases 0-4 are implemented and passing their headless acceptance checks: deterministic
+core, algae-alone equilibrium, sustained daphnia/algae predator-prey oscillation,
+three-trophic-level persistence (algae → daphnia → fish), and now daphnia trait-bin
+evolution — each validated over a full ~90 simulated-minute run, not just a short
+exploratory window. Phase 4's specific claim (introduce fish and mean daphnia body size
+falls; remove them and it climbs back) is confirmed both as two separate 20-seed runs and
+as a single dynamic run that introduces then removes fish mid-session. Phase 5 (the
+player-facing setup layer) — which is what would make this an actually playable game
+rather than a headless/debug-chart simulation — hasn't started yet.
 
 Run any acceptance check directly:
 
 ```
 godot --headless --path . -s res://sim/harness/determinism_check.gd -- --seed=42 --ticks=1000
 godot --headless --path . -s res://sim/harness/equilibrium_check.gd -- --seed=42 --ticks=20000
+godot --headless --path . -s res://sim/harness/mass_conservation_check.gd -- --seed=42 --ticks=54000
 godot --headless --path . -s res://sim/harness/phase2_validate.gd -- --seed=42 --ticks=54000
 godot --headless --path . -s res://sim/harness/phase3_validate.gd
+godot --headless --path . -s res://sim/harness/phase4_validate.gd
 ```
 
-The two sweep scripts (`sweep_phase2.gd`, `sweep_phase3.gd`) grid-search parameters and
-write results to `sweep_results/` (gitignored — regenerate rather than commit).
+The three sweep scripts (`sweep_phase2.gd`, `sweep_phase3.gd`, `sweep_phase4.gd`)
+grid-search parameters and write results to `sweep_results/` (gitignored — regenerate
+rather than commit).
 
 ## Track B status
 
