@@ -29,33 +29,37 @@ void fragment() {
 	vec3 deep_color = vec3(0.01, 0.04, 0.08);
 	vec3 base = mix(shallow_color, deep_color, uv.y);
 
-	// Caustics: two independently scaled/scrolled samples of the same
-	// noise, multiplied - bright only where both happen to be bright,
-	// which is what produces the thin, irregular net real caustics have.
-	vec2 uv1 = uv * 2.2 + vec2(t * 0.05, t * 0.03);
-	vec2 uv2 = uv * 3.1 - vec2(t * 0.04, t * 0.07);
+	// Caustics: two samples of the same noise at close to a 1:1 screen
+	// scale (NOT tiled multiple times across the frame - that was the
+	// visible grid artifact last round), multiplied and then thresholded
+	// with smoothstep so only the brightest ~15% of the overlap actually
+	// shows. Real caustics are sparse bright dapples on mostly-dark water,
+	// not a pattern covering the whole frame.
+	vec2 uv1 = uv * 1.0 + vec2(t * 0.025, t * 0.018);
+	vec2 uv2 = uv * 1.35 - vec2(t * 0.02, t * 0.03);
 	float n1 = texture(noise_tex, uv1).r;
 	float n2 = texture(noise_tex, uv2).r;
-	float caustics = pow(clamp(n1 * n2 * 2.2, 0.0, 1.0), 2.5);
+	float product = n1 * n2;
 	float caustic_strength = 1.0 - uv.y * 0.85;
-	base = screen_blend(base, caustics * caustic_strength * vec3(0.5, 0.75, 0.65));
+	float caustics = smoothstep(0.32, 0.55, product) * caustic_strength;
+	base = screen_blend(base, caustics * vec3(0.32, 0.5, 0.44));
 
 	// Light shafts: a few fixed, slowly-drifting beams, spreading wider
-	// with depth like real light cones do. Softened with screen blending
-	// rather than raw addition so they don't clip into flat white bars.
+	// with depth like real light cones do. Much dimmer than the previous
+	// pass - they should be a subtle accent, not a dominant feature.
 	float shafts = 0.0;
 	for (int i = 0; i < 4; i++) {
 		float fi = float(i);
 		float shaft_x = 0.15 + fi * 0.24 + sin(t * 0.07 + fi * 2.1) * 0.03;
-		float width = mix(0.02, 0.06, uv.y);
+		float width = mix(0.015, 0.045, uv.y);
 		shafts += smoothstep(width, 0.0, abs(uv.x - shaft_x)) * (1.0 - uv.y * 0.85);
 	}
-	base = screen_blend(base, clamp(shafts, 0.0, 1.0) * vec3(0.22, 0.3, 0.28));
+	base = screen_blend(base, clamp(shafts, 0.0, 1.0) * vec3(0.1, 0.15, 0.14));
 
 	// Surface treatment: a gently undulating bright band at the very top.
 	float wave = sin(uv.x * 20.0 + t * 2.0) * 0.01;
 	float surface = smoothstep(0.05 + wave, 0.0 + wave, uv.y);
-	base = screen_blend(base, surface * vec3(0.25, 0.35, 0.32));
+	base = screen_blend(base, surface * vec3(0.18, 0.26, 0.24));
 
 	// Vignette: darkens the corners so the frame reads as a composed shot
 	// rather than a flat, evenly-lit rectangle.
