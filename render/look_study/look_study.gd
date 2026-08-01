@@ -36,28 +36,41 @@ const FISH_SPRITE_SIZE := Vector2(56, 68)
 const LILYPAD_SIZE_RANGE := Vector2(70, 110)
 const ROCK_SIZE_RANGE := Vector2(36, 64)
 
-## fish.png (v2, the version with visible eyes) was generated nose-DOWN -
-## head/eyes at the bottom of the frame, tail curving up top - the
-## opposite of the first version. Confirmed by inspecting the file, not
-## assumed: regenerating with a near-identical prompt does not guarantee
-## the same orientation twice. draw_set_transform's rotation=0 points the
-## image's own "down" (+Y) in that direction already, so the offset to
-## align the nose with velocity is -90 degrees this time.
-const FISH_FACING_OFFSET := -PI / 2.0
+## fish.png (v3, the "likeable" version with big eyes and a straight tail)
+## was generated nose-UP - head/eyes at the top of the frame, tail at the
+## bottom - the opposite of v2. Confirmed by inspecting the file each
+## time, never assumed: regenerating with a similar prompt does not
+## guarantee the same orientation twice, and it has flipped every time so
+## far. draw_set_transform's rotation=0 points the image's own "up" (-Y)
+## in that direction already, so the offset to align the nose with
+## velocity is +90 degrees for this version.
+const FISH_FACING_OFFSET := PI / 2.0
+
+## Whether the tail occupies the TOP or BOTTOM of the source image - see
+## _draw_fish(), which crops the image into a rigid body and a rotating
+## tail. True for a nose-down fish (tail at top, like v2), false for
+## nose-up (tail at bottom, like v3 - the current one). Check this
+## alongside FISH_FACING_OFFSET any time fish.png is regenerated.
+const FISH_TAIL_AT_TOP := false
 
 ## A single static image can't flex, so "swimming" is faked by splitting
 ## the image into a rigid body (drawn once, no wobble) and a tail region
 ## that rotates around the seam where it joins the body - see
-## _draw_fish(). TAIL_FRACTION is the top fraction of the source image
-## (in the nose-down frame, the tail occupies roughly the top third) -
-## estimated by eye, not measured pixel-exact, so it's the first place to
-## adjust if the seam looks wrong. Wobble is now isolated to just the
-## tail instead of the whole body, and reduced from the old 0.22 - the
-## previous pass rotated the entire fish and was called out as too much.
-const FISH_TAIL_FRACTION := 0.32
+## _draw_fish(). TAIL_FRACTION is the fraction of the source image the
+## tail occupies - estimated by eye, not measured pixel-exact, so it's
+## the first place to adjust if the seam looks wrong. Wobble is isolated
+## to just the tail instead of the whole body, and reduced from the
+## original 0.22 - the first pass rotated the entire fish and was called
+## out as too much.
+const FISH_TAIL_FRACTION := 0.3
 const FISH_WOBBLE_AMPLITUDE := 0.16
 const FISH_WOBBLE_BASE_FREQ := 4.0
 const FISH_WOBBLE_SPEED_FACTOR := 0.03
+
+## daphnia.png has its antennae pointing toward the top of the frame
+## (confirmed by inspection) - same nose-up convention as the fish, so
+## the same +90 degree offset applies.
+const DAPHNIA_FACING_OFFSET := PI / 2.0
 
 const ALGAE_POP_COLOR := Color(0.55, 0.85, 0.5)
 const DAPHNIA_POP_COLOR := Color(0.75, 0.88, 0.95)
@@ -140,7 +153,8 @@ func _spawn_algae() -> Dictionary:
 	return {"pos": _random_position(), "drift_phase": randf() * TAU}
 
 func _spawn_daphnia() -> Dictionary:
-	return {"pos": _random_position(), "vel": Vector2.ZERO, "hop_timer": randf_range(0.4, 1.4), "eat_cooldown": 0.0}
+	var facing := Vector2.UP.rotated(randf() * TAU)
+	return {"pos": _random_position(), "vel": Vector2.ZERO, "facing": facing, "hop_timer": randf_range(0.4, 1.4), "eat_cooldown": 0.0}
 
 func _spawn_fish() -> Dictionary:
 	var angle := randf() * TAU
@@ -225,6 +239,11 @@ func _step_daphnia(delta: float) -> void:
 			else:
 				direction = Vector2(randf_range(-0.4, 0.4), -1.0).normalized()
 			d.vel = direction * DAPHNIA_HOP_STRENGTH * randf_range(0.6, 1.2)
+			# Facing is set once per hop, not derived from the live (decaying)
+			# velocity - otherwise it would snap toward angle 0 every time
+			# vel damps to exactly zero between hops instead of holding the
+			# last jerk's direction.
+			d.facing = direction
 		d.vel = d.vel.move_toward(Vector2.ZERO, DAPHNIA_DAMPING * DAPHNIA_HOP_STRENGTH * delta)
 		d.pos += d.vel * delta
 		d.pos.y += DAPHNIA_SINK_SPEED * delta
@@ -318,10 +337,10 @@ func _draw_sprite(texture: Texture2D, pos: Vector2, draw_size: Vector2, rotation
 
 ## Fish get a two-piece draw instead of _draw_sprite: a rigid body (no
 ## wobble, rotates only with the overall heading) and a tail cropped from
-## the top of the same source image (see FISH_TAIL_FRACTION), rotated
-## around the seam where it joins the body. That's what makes only the
-## tail wag instead of the whole fish rocking - no second image needed,
-## just draw_texture_rect_region on two sub-rects of the one texture.
+## the same source image (see FISH_TAIL_FRACTION / FISH_TAIL_AT_TOP),
+## rotated around the seam where it joins the body. That's what makes
+## only the tail wag instead of the whole fish rocking - no second image
+## needed, just draw_texture_rect_region on two sub-rects of one texture.
 func _draw_fish(f: Dictionary) -> void:
 	var base_rotation: float = f.vel.angle() + FISH_FACING_OFFSET
 	var wobble: float = sin(f.wobble_phase) * FISH_WOBBLE_AMPLITUDE
@@ -330,18 +349,34 @@ func _draw_fish(f: Dictionary) -> void:
 	var tail_src_height := tex_size.y * FISH_TAIL_FRACTION
 	var tail_local_height := FISH_SPRITE_SIZE.y * FISH_TAIL_FRACTION
 	var body_local_height := FISH_SPRITE_SIZE.y - tail_local_height
-	var seam_local_y := -FISH_SPRITE_SIZE.y / 2.0 + tail_local_height
+	var half_height := FISH_SPRITE_SIZE.y / 2.0
+	var half_width := FISH_SPRITE_SIZE.x / 2.0
+
+	var body_src: Rect2
+	var tail_src: Rect2
+	var body_dest: Rect2
+	var tail_dest: Rect2
+	var seam_local_y: float
+
+	if FISH_TAIL_AT_TOP:
+		tail_src = Rect2(Vector2.ZERO, Vector2(tex_size.x, tail_src_height))
+		body_src = Rect2(Vector2(0.0, tail_src_height), Vector2(tex_size.x, tex_size.y - tail_src_height))
+		seam_local_y = -half_height + tail_local_height
+		body_dest = Rect2(Vector2(-half_width, seam_local_y), Vector2(FISH_SPRITE_SIZE.x, body_local_height))
+		tail_dest = Rect2(Vector2(-half_width, -tail_local_height), Vector2(FISH_SPRITE_SIZE.x, tail_local_height))
+	else:
+		body_src = Rect2(Vector2.ZERO, Vector2(tex_size.x, tex_size.y - tail_src_height))
+		tail_src = Rect2(Vector2(0.0, tex_size.y - tail_src_height), Vector2(tex_size.x, tail_src_height))
+		seam_local_y = half_height - tail_local_height
+		body_dest = Rect2(Vector2(-half_width, -half_height), Vector2(FISH_SPRITE_SIZE.x, body_local_height))
+		tail_dest = Rect2(Vector2(-half_width, 0.0), Vector2(FISH_SPRITE_SIZE.x, tail_local_height))
 
 	draw_set_transform(f.pos, base_rotation, Vector2.ONE)
-	var body_dest := Rect2(Vector2(-FISH_SPRITE_SIZE.x / 2.0, seam_local_y), Vector2(FISH_SPRITE_SIZE.x, body_local_height))
-	var body_src := Rect2(Vector2(0.0, tail_src_height), Vector2(tex_size.x, tex_size.y - tail_src_height))
 	draw_texture_rect_region(FISH_TEXTURE, body_dest, body_src)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	var seam_world: Vector2 = f.pos + Vector2(0, seam_local_y).rotated(base_rotation)
 	draw_set_transform(seam_world, base_rotation + wobble, Vector2.ONE)
-	var tail_dest := Rect2(Vector2(-FISH_SPRITE_SIZE.x / 2.0, -tail_local_height), Vector2(FISH_SPRITE_SIZE.x, tail_local_height))
-	var tail_src := Rect2(Vector2.ZERO, Vector2(tex_size.x, tail_src_height))
 	draw_texture_rect_region(FISH_TEXTURE, tail_dest, tail_src)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -359,7 +394,7 @@ func _draw() -> void:
 	for a in _algae:
 		_draw_sprite(ALGAE_TEXTURE, a.pos, ALGAE_SPRITE_SIZE, 0.0)
 	for d in _daphnia:
-		_draw_sprite(DAPHNIA_TEXTURE, d.pos, DAPHNIA_SPRITE_SIZE, 0.0)
+		_draw_sprite(DAPHNIA_TEXTURE, d.pos, DAPHNIA_SPRITE_SIZE, d.facing.angle() + DAPHNIA_FACING_OFFSET)
 	for f in _fish:
 		_draw_fish(f)
 
