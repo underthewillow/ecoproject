@@ -69,6 +69,12 @@ func get_pace_scale() -> float:
 func get_algae_carrying_capacity() -> float:
 	return _config.algae_carrying_capacity
 
+## For Track B's daphnia mean-size gauge - the full trait range a bin's
+## body size can take (§4.1), used to normalize daphnia_mean_size into a
+## 0..1 gauge fraction.
+func get_daphnia_size_range() -> Vector2:
+	return Vector2(_config.daphnia_size_min, _config.daphnia_size_max)
+
 ## Lighter than a full snapshot() (skips duplicating daphnia_bins etc.) -
 ## for Track B's per-tick eat-flash credit accumulator, which needs to
 ## read this after every individual _sim.step() call, potentially several

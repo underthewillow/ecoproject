@@ -11,15 +11,24 @@ extends Control
 ##
 ## This scene is also now the actual playable prototype, not just a visual
 ## study: it owns the two player verbs (introduce a species, add
-## nutrients) and the difficulty toggle, ported over from
-## scenes/debug_chart.gd. §7's "numbers stay hidden by default" is the
-## long-term intent - capacity reads as a glow, nutrient load as a water
-## tint, detritus as silt density, a collapse as a full-pond flash (see
-## _draw()'s gauge helpers) - but direct feedback from actually playtesting
-## this was that the numbers are still needed *right now* to judge whether
-## any of it is tuned sensibly. See NUMERIC_OVERLAY_ENABLED below: the raw
-## values are drawn as text too, meant to come back off once there's
-## enough played experience to trust the visual gauges alone.
+## nutrients) and the difficulty toggle. Direct feedback split these into
+## two deliberately different presentation styles rather than one:
+##
+## - The POND ITSELF (this script's _draw(), inside PondViewport) carries
+##   only effects that are arguably part of the water/scene, not UI chrome:
+##   nutrient load as a water tint, detritus as silt density, a collapse as
+##   a full-pond flash. Nothing else draws on top of it - no buttons, no
+##   numbers, no gauges.
+## - A separate SIDE PANEL (look_study.tscn's %SidePanel, built by
+##   _build_ui() below) holds everything actionable: one card per species
+##   (icon, population gauge bar, Introduce button), gauge bars for
+##   capacity/nutrients/detritus/daphnia mean size, the nutrient-amount
+##   control, and the difficulty buttons. §7's "numbers stay hidden by
+##   default" is still the long-term intent, but direct playtesting
+##   feedback was that the numbers are needed *right now* to judge whether
+##   any of this is tuned sensibly - see NUMERIC_LABELS_ENABLED: the raw
+##   values are shown as text next to each bar too, meant to come back off
+##   once there's enough played experience to trust the bars alone.
 ##
 ## Sprite counts track real population near-1:1 (see
 ## _resize_to_population) rather than through a normalized/log-scaled
@@ -132,10 +141,10 @@ const FISH_MAX_PARTICLES := 25
 ## Silt isn't a species a player introduces via founder count, so it keeps
 ## the earlier reference-scale/log-curve treatment (see
 ## _population_to_count) rather than the near-1:1 mapping above - it's
-## meant to read as "how murky/silty," not as a literal count.
-const DETRITUS_REFERENCE_LEVEL := 15.0
-const NUTRIENT_TINT_REFERENCE_LEVEL := 25.0
-const CAPACITY_GAUGE_REFERENCE_LEVEL := 200.0
+## meant to read as "how murky/silty," not as a literal count. Its
+## reference level is declared further down alongside the other gauge-bar
+## maximums, since it now does double duty as the side panel's detritus bar
+## max too.
 
 ## Fractional remainder below which no partially-grown "budding" individual
 ## is shown at all - avoids a barely-visible sliver appearing/disappearing
@@ -155,8 +164,8 @@ const POPULATION_JUMP_THRESHOLD := 0.3
 
 ## Numbers are still needed to playtest (direct feedback) even though §7's
 ## long-term intent is to hide them - see the top-of-file docstring. Flip
-## to false once the visual gauges alone are trusted.
-const NUMERIC_OVERLAY_ENABLED := true
+## to false once the panel's gauge bars alone are trusted.
+const NUMERIC_LABELS_ENABLED := true
 
 ## Daphnia's rendered size follows the real evolutionary signal (§4.2) -
 ## sim_config.gd's daphnia_reference_size (1.0) is the sprite's designed
@@ -166,12 +175,17 @@ const NUMERIC_OVERLAY_ENABLED := true
 const DAPHNIA_REFERENCE_TRAIT_SIZE := 1.0
 const DAPHNIA_VISUAL_SIZE_SCALE_RANGE := Vector2(0.5, 1.8)
 
-## Visual gauges for capacity/nutrients/detritus/collapse (§7's "numbers
-## stay hidden by default" - diagnose the pond by looking, not by reading).
-const CAPACITY_GAUGE_POSITION := Vector2(40, 40)
-const CAPACITY_GAUGE_MIN_RADIUS := 6.0
-const CAPACITY_GAUGE_MAX_RADIUS := 22.0
-const CAPACITY_GAUGE_COLOR := Color(0.6, 0.95, 0.85)
+## Gauge-bar maximums for the side panel (see _build_ui/_update_panel).
+## Algae reuses sim_config.gd's own carrying capacity (a real ceiling,
+## fetched dynamically via _sim.get_algae_carrying_capacity() - not a
+## constant here); daphnia/fish/nutrients/detritus/capacity have no
+## equivalent hard cap, so these are hand-picked "reads as full" reference
+## levels, same caveat as everything else calibrated by feel in Phase 5/6.
+const DAPHNIA_GAUGE_MAX_POPULATION := 20.0
+const FISH_GAUGE_MAX_POPULATION := 5.0
+const NUTRIENT_TINT_REFERENCE_LEVEL := 25.0  # also the nutrient gauge bar's max - one number, two uses
+const DETRITUS_REFERENCE_LEVEL := 15.0  # also the detritus gauge bar's max
+const CAPACITY_GAUGE_MAX := 200.0
 
 const NUTRIENT_TINT_COLOR := Color(0.45, 0.42, 0.18)
 const NUTRIENT_TINT_MAX_ALPHA := 0.28
@@ -283,6 +297,26 @@ var _daphnia_button: Button
 var _fish_button: Button
 var _nutrient_button: Button
 
+## Species gauge bars + value labels (one card each, see _make_species_card).
+var _algae_bar: ProgressBar
+var _algae_value_label: Label
+var _daphnia_bar: ProgressBar
+var _daphnia_value_label: Label
+var _fish_bar: ProgressBar
+var _fish_value_label: Label
+
+## Metric gauge bars + value labels (see _make_metric_row).
+var _capacity_bar: ProgressBar
+var _capacity_value_label: Label
+var _nutrients_bar: ProgressBar
+var _nutrients_value_label: Label
+var _detritus_bar: ProgressBar
+var _detritus_value_label: Label
+var _daphnia_size_bar: ProgressBar
+var _daphnia_size_value_label: Label
+var _collapse_count_label: Label
+var _pace_label: Label
+
 func _ready() -> void:
 	randomize()  # cosmetic layer only - no determinism requirement here, unlike the sim's seeded RNG
 
@@ -303,56 +337,110 @@ func _ready() -> void:
 		_lilypads.append(_spawn_lilypad())
 	_build_ui()
 
-## The two player verbs (§6), ported over from scenes/debug_chart.gd now
-## that this is the real playable scene. No numeric cost/capacity preview
-## here (unlike debug_chart's) - §7 wants numbers hidden by default, so
-## affordability is communicated by disabling a button rather than
-## printing what it costs (see _update_affordability).
+## The two player verbs (§6) plus every gauge, built into %SidePanel (see
+## look_study.tscn) rather than this node - direct feedback was that the
+## pond itself should carry no UI chrome at all, buttons and gauges
+## included, and belongs in a panel separate from the water. This node
+## (Particles) still owns the SimCore and all the game logic; it just
+## reaches sideways into a sibling Control to place the UI, rather than
+## parenting it onto itself the way an earlier pass did (which drew
+## directly on top of the pond).
 func _build_ui() -> void:
-	var introduce_row := HBoxContainer.new()
-	introduce_row.position = Vector2(8, 8)
-	add_child(introduce_row)
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	%SidePanel.add_child(scroll)
 
-	introduce_row.add_child(_make_label("Founder count:"))
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 10)
+	content.custom_minimum_size = Vector2(240, 0)
+	scroll.add_child(content)
+
+	content.add_child(_make_label("Difficulty"))
+	var difficulty_row := HBoxContainer.new()
+	content.add_child(difficulty_row)
+	difficulty_row.add_child(_make_button("Challenging", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CHALLENGING])))
+	difficulty_row.add_child(_make_button("Casual", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CASUAL])))
+	difficulty_row.add_child(_make_button("Relaxing", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.RELAXING])))
+	_pace_label = _make_label("Pace:")
+	content.add_child(_pace_label)
+
+	content.add_child(HSeparator.new())
+
+	var founder_row := HBoxContainer.new()
+	content.add_child(founder_row)
+	founder_row.add_child(_make_label("Founder count:"))
 	_founder_spin = SpinBox.new()
 	_founder_spin.min_value = 0.5
 	_founder_spin.max_value = 50.0
 	_founder_spin.step = 0.5
 	_founder_spin.value = FOUNDER_DEFAULT
-	_founder_spin.custom_minimum_size = Vector2(80, 0)
-	introduce_row.add_child(_founder_spin)
+	_founder_spin.custom_minimum_size = Vector2(70, 0)
+	founder_row.add_child(_founder_spin)
 
-	_algae_button = _make_button("Introduce Algae", func(): _sim.introduce_species("algae", _founder_spin.value))
-	_daphnia_button = _make_button("Introduce Daphnia", func(): _sim.introduce_species("daphnia", _founder_spin.value))
-	_fish_button = _make_button("Introduce Fish", func(): _sim.introduce_species("fish", _founder_spin.value))
-	introduce_row.add_child(_algae_button)
-	introduce_row.add_child(_daphnia_button)
-	introduce_row.add_child(_fish_button)
+	content.add_child(HSeparator.new())
 
-	var nutrient_row := HBoxContainer.new()
-	nutrient_row.position = Vector2(8, 44)
-	add_child(nutrient_row)
+	var algae_card := _make_species_card(ALGAE_TEXTURE, "Algae", func(): _sim.introduce_species("algae", _founder_spin.value))
+	content.add_child(algae_card.root)
+	_algae_bar = algae_card.bar
+	_algae_value_label = algae_card.value_label
+	_algae_button = algae_card.button
 
-	nutrient_row.add_child(_make_label("Nutrient amount:"))
+	var daphnia_card := _make_species_card(DAPHNIA_TEXTURE, "Daphnia", func(): _sim.introduce_species("daphnia", _founder_spin.value))
+	content.add_child(daphnia_card.root)
+	_daphnia_bar = daphnia_card.bar
+	_daphnia_value_label = daphnia_card.value_label
+	_daphnia_button = daphnia_card.button
+
+	var fish_card := _make_species_card(FISH_TEXTURE, "Fish", func(): _sim.introduce_species("fish", _founder_spin.value))
+	content.add_child(fish_card.root)
+	_fish_bar = fish_card.bar
+	_fish_value_label = fish_card.value_label
+	_fish_button = fish_card.button
+
+	content.add_child(HSeparator.new())
+
+	var nutrients_metric := _make_metric_row("Nutrients")
+	content.add_child(nutrients_metric.root)
+	_nutrients_bar = nutrients_metric.bar
+	_nutrients_value_label = nutrients_metric.value_label
+
+	var nutrient_amount_row := HBoxContainer.new()
+	content.add_child(nutrient_amount_row)
+	nutrient_amount_row.add_child(_make_label("Amount:"))
 	_nutrient_spin = SpinBox.new()
 	_nutrient_spin.min_value = 0.5
 	_nutrient_spin.max_value = 50.0
 	_nutrient_spin.step = 0.5
 	_nutrient_spin.value = NUTRIENT_AMOUNT_DEFAULT
-	_nutrient_spin.custom_minimum_size = Vector2(80, 0)
-	nutrient_row.add_child(_nutrient_spin)
-
+	_nutrient_spin.custom_minimum_size = Vector2(70, 0)
+	nutrient_amount_row.add_child(_nutrient_spin)
 	_nutrient_button = _make_button("Add Nutrients", func(): _sim.add_nutrients(_nutrient_spin.value))
-	nutrient_row.add_child(_nutrient_button)
+	nutrient_amount_row.add_child(_nutrient_button)
 
-	var difficulty_row := HBoxContainer.new()
-	difficulty_row.position = Vector2(8, 80)
-	add_child(difficulty_row)
+	content.add_child(HSeparator.new())
 
-	difficulty_row.add_child(_make_label("Difficulty:"))
-	difficulty_row.add_child(_make_button("Challenging", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CHALLENGING])))
-	difficulty_row.add_child(_make_button("Casual", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CASUAL])))
-	difficulty_row.add_child(_make_button("Relaxing", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.RELAXING])))
+	var detritus_metric := _make_metric_row("Detritus")
+	content.add_child(detritus_metric.root)
+	_detritus_bar = detritus_metric.bar
+	_detritus_value_label = detritus_metric.value_label
+
+	content.add_child(HSeparator.new())
+
+	var capacity_metric := _make_metric_row("Capacity")
+	content.add_child(capacity_metric.root)
+	_capacity_bar = capacity_metric.bar
+	_capacity_value_label = capacity_metric.value_label
+
+	content.add_child(HSeparator.new())
+
+	var daphnia_size_metric := _make_metric_row("Daphnia mean size")
+	content.add_child(daphnia_size_metric.root)
+	_daphnia_size_bar = daphnia_size_metric.bar
+	_daphnia_size_value_label = daphnia_size_metric.value_label
+
+	content.add_child(HSeparator.new())
+	_collapse_count_label = _make_label("Collapses: 0")
+	content.add_child(_collapse_count_label)
 
 func _make_label(text: String) -> Label:
 	var label := Label.new()
@@ -364,6 +452,60 @@ func _make_button(text: String, on_pressed: Callable) -> Button:
 	button.text = text
 	button.pressed.connect(on_pressed)
 	return button
+
+## One self-contained row per species (§ side-panel redesign: icon, gauge,
+## and the Introduce button live together rather than in separate grouped
+## sections) - everything needed to read and act on one species stays in
+## one place. Returns the pieces the caller needs to keep updating.
+func _make_species_card(texture: Texture2D, species_name: String, on_introduce: Callable) -> Dictionary:
+	var root := VBoxContainer.new()
+
+	var header := HBoxContainer.new()
+	root.add_child(header)
+
+	var icon := TextureRect.new()
+	icon.texture = texture
+	icon.custom_minimum_size = Vector2(28, 28)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	header.add_child(icon)
+
+	var name_label := _make_label(species_name)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(name_label)
+
+	var value_label := _make_label("")
+	header.add_child(value_label)
+
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 16)
+	root.add_child(bar)
+
+	var button := _make_button("Introduce " + species_name, on_introduce)
+	root.add_child(button)
+
+	return {"root": root, "bar": bar, "value_label": value_label, "button": button}
+
+## A read-only gauge (no button) for a single metric - label, current
+## value, and a bar stacked together.
+func _make_metric_row(label_text: String) -> Dictionary:
+	var root := VBoxContainer.new()
+
+	var header := HBoxContainer.new()
+	root.add_child(header)
+	var label := _make_label(label_text)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(label)
+	var value_label := _make_label("")
+	header.add_child(value_label)
+
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 16)
+	root.add_child(bar)
+
+	return {"root": root, "bar": bar, "value_label": value_label}
 
 ## Non-numeric affordability cue (§7 - no cost/capacity numbers shown):
 ## grey out whichever introduce/nutrient action the player currently can't
@@ -378,6 +520,32 @@ func _update_affordability() -> void:
 	_daphnia_button.disabled = _sim.get_introduction_cost("daphnia", _founder_spin.value) > capacity
 	_fish_button.disabled = _sim.get_introduction_cost("fish", _founder_spin.value) > capacity
 	_nutrient_button.disabled = _sim.get_nutrient_cost(_nutrient_spin.value) > capacity
+
+## Refreshes every panel gauge/label from real state - called once per real
+## sim tick (see _step_sim_ticks), not every render frame, since these
+## values only change that often anyway.
+func _update_panel(state) -> void:
+	_set_gauge(_algae_bar, _algae_value_label, state.algae, _sim.get_algae_carrying_capacity())
+	_set_gauge(_daphnia_bar, _daphnia_value_label, state.daphnia, DAPHNIA_GAUGE_MAX_POPULATION)
+	_set_gauge(_fish_bar, _fish_value_label, state.fish, FISH_GAUGE_MAX_POPULATION)
+	_set_gauge(_nutrients_bar, _nutrients_value_label, state.nutrients, NUTRIENT_TINT_REFERENCE_LEVEL)
+	_set_gauge(_detritus_bar, _detritus_value_label, state.detritus, DETRITUS_REFERENCE_LEVEL)
+	_set_gauge(_capacity_bar, _capacity_value_label, state.capacity, CAPACITY_GAUGE_MAX)
+
+	var size_range: Vector2 = _sim.get_daphnia_size_range()
+	_daphnia_size_bar.min_value = size_range.x
+	_daphnia_size_bar.max_value = size_range.y
+	_daphnia_size_bar.value = state.daphnia_mean_size
+	_daphnia_size_value_label.text = ("%.2f" % state.daphnia_mean_size) if NUMERIC_LABELS_ENABLED else ""
+
+	_collapse_count_label.text = "Collapses: %d" % state.collapse_count
+	_pace_label.text = "Pace: %.2fx" % _sim.get_pace_scale()
+
+func _set_gauge(bar: ProgressBar, value_label: Label, value: float, max_value: float) -> void:
+	bar.min_value = 0.0
+	bar.max_value = max_value
+	bar.value = value
+	value_label.text = ("%.2f" % value) if NUMERIC_LABELS_ENABLED else ""
 
 func _process(delta: float) -> void:
 	_time += delta
@@ -424,6 +592,7 @@ func _step_sim_ticks(delta: float) -> void:
 
 	_update_population_targets(state)
 	_daphnia_size_scale = clampf(state.daphnia_mean_size / DAPHNIA_REFERENCE_TRAIT_SIZE, DAPHNIA_VISUAL_SIZE_SCALE_RANGE.x, DAPHNIA_VISUAL_SIZE_SCALE_RANGE.y)
+	_update_panel(state)
 
 ## Log-scaled, hard-capped mapping used only for silt/detritus now (see the
 ## const comments above) - normalizes against a reference "abundant" level
@@ -930,9 +1099,7 @@ func _draw() -> void:
 		color.a = 1.0 - t
 		draw_circle(p.pos, lerpf(2.0, 14.0, t), color)
 
-	_draw_capacity_gauge()
 	_draw_collapse_flash()
-	_draw_numeric_overlay()
 
 ## Nutrient load (§7) - a full-scene translucent wash rather than a
 ## readout. Scales toward NUTRIENT_TINT_MAX_ALPHA as nutrients approach
@@ -946,24 +1113,12 @@ func _draw_nutrient_tint() -> void:
 	color.a = t * NUTRIENT_TINT_MAX_ALPHA
 	draw_rect(Rect2(Vector2.ZERO, size), color)
 
-## Capacity (§6.3) as a glowing orb rather than a number - fits the
-## existing "bioluminescent" art direction better than a bar or dial would.
-## Both radius and brightness grow with capacity, saturating near
-## CAPACITY_GAUGE_REFERENCE_LEVEL.
-func _draw_capacity_gauge() -> void:
-	if _last_state == null:
-		return
-	var t := clampf(log(maxf(_last_state.capacity, 0.0) + 1.0) / log(CAPACITY_GAUGE_REFERENCE_LEVEL + 1.0), 0.0, 1.0)
-	var radius := lerpf(CAPACITY_GAUGE_MIN_RADIUS, CAPACITY_GAUGE_MAX_RADIUS, t)
-	var glow := CAPACITY_GAUGE_COLOR
-	glow.a = lerpf(0.35, 0.9, t)
-	draw_circle(CAPACITY_GAUGE_POSITION, radius * 1.6, Color(glow.r, glow.g, glow.b, glow.a * 0.35))
-	draw_circle(CAPACITY_GAUGE_POSITION, radius, glow)
-
 ## A collapse (§1 pillar 3) is a real, sudden event - "a story, not a game
 ## over" only reads that way if the player can tell something happened, so
 ## it gets a brief full-pond flash rather than being invisible outside the
-## debug chart's line graph.
+## side panel's collapse counter. Kept on the pond itself (unlike the
+## capacity/numeric readouts, which moved to %SidePanel) since it changes
+## the water's own appearance rather than drawing UI chrome on top of it.
 func _draw_collapse_flash() -> void:
 	if _collapse_flash_timer <= 0.0:
 		return
@@ -971,22 +1126,3 @@ func _draw_collapse_flash() -> void:
 	var color := COLLAPSE_FLASH_COLOR
 	color.a = t * 0.5
 	draw_rect(Rect2(Vector2.ZERO, size), color)
-
-## Playtesting needs the real numbers, not just the visual gauges above -
-## see NUMERIC_OVERLAY_ENABLED and the top-of-file docstring. Drawn last so
-## it's readable over everything else, including the nutrient tint/
-## collapse flash.
-func _draw_numeric_overlay() -> void:
-	if not NUMERIC_OVERLAY_ENABLED or _last_state == null:
-		return
-	var s = _last_state
-	var lines := [
-		"algae=%.2f  daphnia=%.2f (mean_size=%.2f)  fish=%.2f" % [s.algae, s.daphnia, s.daphnia_mean_size, s.fish],
-		"nutrients=%.2f  detritus=%.2f  capacity=%.2f  collapses=%d  pace=%.2fx" % [
-			s.nutrients, s.detritus, s.capacity, s.collapse_count, _sim.get_pace_scale()
-		],
-	]
-	var y := int(size.y) - 44
-	for line in lines:
-		draw_string(ThemeDB.fallback_font, Vector2(8, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
-		y += 20

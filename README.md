@@ -93,13 +93,15 @@ scenes/
 render/                      Track B — look/motion/audio study, now partially merged with
                                Track A (Phase 6 - visuals only; audio hasn't merged yet)
   look_study/
-    look_study.tscn / .gd       The real playable prototype: painterly top-down pond reading
-                                a real SimCore, algae/daphnia/fish rendered from generated
-                                sprites, cosmetic predation, daphnia sprite size following the
-                                real mean-trait evolution signal (§4.2), capacity/nutrient/
-                                detritus shown as a glow/tint/silt-density rather than
-                                numbers (§7), and the introduce-species/nutrient/difficulty
-                                controls (ported from debug_chart.gd)
+    look_study.tscn / .gd       The real playable prototype, split into a PondViewport (the
+                                actual pond - background, generated-sprite creatures, cosmetic
+                                predation, daphnia sprite size following the real mean-trait
+                                evolution signal (§4.2), and diegetic-only effects: nutrient
+                                tint, silt density, a collapse flash) and a fixed-width
+                                %SidePanel with everything actionable: one card per species
+                                (icon, population gauge, Introduce button), gauge bars for
+                                capacity/nutrients/detritus/daphnia mean size, and the
+                                nutrient/difficulty controls - nothing overlays the pond itself
   fake_pond_state.gd            Shared fake population-count formula - look_study.gd no
                                 longer reads this (see above), but pond_audio.gd still does;
                                 wiring audio to real state is a separate, not-yet-done step
@@ -234,10 +236,19 @@ player should diagnose by looking":
   mean body size, so "fish are shrinking the daphnia" is something visible in the pond
   itself, not just a line on the debug chart
 - **Capacity (§6.3)** and **collapse events (§1 pillar 3)** aren't in that original four-item
-  list, but needed the same treatment: capacity is a glowing orb (fits the existing
-  "bioluminescent" direction better than a bar/dial would) rather than a number, and a
-  collapse triggers a brief full-pond flash rather than being invisible outside the debug
-  chart's line graph
+  list, but needed the same treatment: a collapse triggers a brief full-pond flash rather
+  than being invisible outside the side panel's collapse counter
+
+**The pond and the UI are now a real side-by-side split**, not overlapping layers - direct
+feedback was that the pond itself should carry no UI chrome at all. `look_study.tscn` splits
+into an `HBoxContainer` with a `PondViewport` (background + creatures, expands to fill
+whatever's left) and a fixed-width `%SidePanel` holding everything actionable: one
+self-contained card per species (icon, population gauge bar, Introduce button), gauge bars
+for capacity/nutrients/detritus/daphnia mean size, the nutrient-amount control, and the
+difficulty buttons. The pond itself keeps only the effects that are arguably part of the
+water/scene rather than HUD chrome - nutrient tint, silt density, the collapse flash -
+nothing else draws on top of it. Numeric values are still shown next to each bar
+(`NUMERIC_LABELS_ENABLED`) for the same playtesting reason as before.
 
 **A cross-track lesson from playtesting**: tying eat-flash frequency to the real
 grazing/predation rate (above) removed the old per-predator cooldown that used to
@@ -257,10 +268,15 @@ the rest of B3, outside what I can check myself.
 
 §7's "numbers stay hidden by default" is still the long-term intent, but direct playtesting
 feedback was that the numbers are needed *right now* to judge whether any of this is tuned
-sensibly - `look_study.gd` draws the raw values as text too (`NUMERIC_OVERLAY_ENABLED`),
-meant to come back off once there's enough played experience to trust the visual gauges
-alone.
+sensibly - the side panel shows each value as text next to its bar too
+(`NUMERIC_LABELS_ENABLED`), meant to come back off once there's enough played experience to
+trust the bars alone.
 
 I can't visually judge whether any of this actually looks *right* - same ceiling as the
 audio work, where every check was technical (does it run without errors, are the numbers in
-sane ranges) rather than a judgment of quality. Worth actually playing before trusting it.
+sane ranges) rather than a judgment of quality. The side-panel split specifically has one
+more layer to that ceiling: headless testing confirmed every widget exists, is wired to the
+right SimCore value, and updates correctly, but Godot's Container layout sizing doesn't
+resolve without a real render pass, so the actual on-screen proportions (does the pond
+genuinely dominate the window the way it's supposed to) can only be confirmed by running it
+in the editor. Worth actually playing before trusting any of this.
