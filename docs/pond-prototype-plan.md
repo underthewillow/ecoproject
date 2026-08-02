@@ -335,7 +335,28 @@ Deferred, but the architecture shouldn't foreclose them:
 
 - Dissolved oxygen, eutrophication, and the algal-bloom crash *(the first mechanic that can
   kill everything — add only once Phase 4 is stable)*
-- Decomposers as a playable species
+- **Decomposers as a playable species.** A detritus-eating population creating a second,
+  two-way nutrient loop alongside the existing algae → daphnia → fish chain: it would
+  consume detritus, split between its own biomass and directly remineralized nutrients, and
+  its own mortality would return to detritus rather than being lost - closing a loop instead
+  of extending a chain. Visually it should read as *benthic*, not pelagic: real detritivores
+  work the pond floor, so where daphnia hop through open water and fish glide through it,
+  this should crawl - slow, continuous, surface-following motion low in the water column,
+  clustered near wherever detritus/silt has accumulated, so its presence itself becomes a
+  visual cue for "there's cleanup work happening down there." A headless mass-conservation
+  scaffold already exists (`sim/core/sim_config.gd`'s `enable_decomposer`,
+  `sim/harness/decomposer_apex_predator_check.gd`) but it is gated off and untuned - this
+  remains a backlog item, not a shipped mechanic.
+- **An apex predator preying on fish**, closing a fourth trophic level. Deliberately slow
+  (low ingestion and reproduction) by design: a fast-moving fourth level would double the
+  number of oscillating relationships the player has to track (§11.4's quadratic-
+  interactions warning), where a slow one instead reads as an occasional, gentle check on
+  fish rather than another fast cycle to babysit. Visually it should read as *rare and
+  patient*, the opposite of fish's glide-then-dart: long, unhurried cruising with very
+  infrequent, deliberate strikes, and few enough individuals that it could be rendered as a
+  singular, noteworthy presence rather than a particle population like the other three - its
+  scarcity should look intentional, not like a bug in the population count. Same scaffold
+  status as the decomposer above (`enable_apex_predator`), gated off and untuned.
 - Multiple distinct species per ecological role (e.g. two algae types, two grazer types,
   two fish types) — not the same idea as speciation below (that's one lineage branching
   over time; this is starting with several unrelated species occupying the same trophic

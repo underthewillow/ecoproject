@@ -58,6 +58,24 @@ var respired: float = 0.0
 var capacity: float = 0.0
 var collapse_count: int = 0
 
+## Real biomass consumed THIS tick - not part of any conserved-mass
+## ledger themselves (they're just a readout of total_grazing/
+## total_predation, already accounted for elsewhere), added purely so
+## Track B's cosmetic "eating" flashes can be paced at the real
+## consumption rate instead of an arbitrary proximity/cooldown guess (see
+## look_study.gd's eat-credit accumulator).
+var algae_grazed_this_tick: float = 0.0
+var daphnia_predated_this_tick: float = 0.0
+
+## Backlog scaffold, not part of the shipped loop (§9's "architecture
+## shouldn't foreclose this"): a detritus-eating decomposer and a
+## fish-eating apex predator, both scalar like fish - see sim_config.gd's
+## enable_decomposer/enable_apex_predator, which default off so every
+## existing harness and the current playable session are unaffected by
+## these fields simply existing at 0.0.
+var decomposer: float = 0.0
+var apex_predator: float = 0.0
+
 func duplicate_state() -> RefCounted:
 	var copy = get_script().new()
 	copy.tick = tick
@@ -72,4 +90,8 @@ func duplicate_state() -> RefCounted:
 	copy.respired = respired
 	copy.capacity = capacity
 	copy.collapse_count = collapse_count
+	copy.algae_grazed_this_tick = algae_grazed_this_tick
+	copy.daphnia_predated_this_tick = daphnia_predated_this_tick
+	copy.decomposer = decomposer
+	copy.apex_predator = apex_predator
 	return copy

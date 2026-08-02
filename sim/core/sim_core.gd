@@ -33,6 +33,8 @@ func _init(seed_value: int, config: SimConfig = null) -> void:
 	_state.nutrients = _config.initial_nutrients
 	_state.detritus = _config.initial_detritus
 	_state.fish = _config.initial_fish
+	_state.decomposer = _config.initial_decomposer
+	_state.apex_predator = _config.initial_apex_predator
 	_state.capacity = _config.initial_capacity
 	_pond_established = _state.algae >= _config.collapse_threshold
 
@@ -63,6 +65,19 @@ func set_pace_scale(value: float) -> void:
 
 func get_pace_scale() -> float:
 	return _config.pace_scale
+
+func get_algae_carrying_capacity() -> float:
+	return _config.algae_carrying_capacity
+
+## Lighter than a full snapshot() (skips duplicating daphnia_bins etc.) -
+## for Track B's per-tick eat-flash credit accumulator, which needs to
+## read this after every individual _sim.step() call, potentially several
+## times per rendered frame.
+func get_last_tick_consumption() -> Dictionary:
+	return {
+		"algae_grazed": _state.algae_grazed_this_tick,
+		"daphnia_predated": _state.daphnia_predated_this_tick,
+	}
 
 ## Player mechanics (§6). Two verbs: introduce a species (§6.1/§6.2) and add
 ## nutrients (§6.4) - both spend capacity, both no-ops (return false, no
@@ -109,10 +124,13 @@ func _daphnia_founder_width(founder_count: float) -> float:
 	var t := clampf(founder_count / c.daphnia_founder_reference_count, 0.0, 1.0)
 	return lerpf(c.daphnia_founder_min_width, c.daphnia_founder_max_width, t)
 
+func get_nutrient_cost(amount: float) -> float:
+	return maxf(amount, 0.0) * _config.nutrient_cost_per_unit
+
 func add_nutrients(amount: float) -> bool:
 	if amount <= 0.0:
 		return false
-	var cost := amount * _config.nutrient_cost_per_unit
+	var cost := get_nutrient_cost(amount)
 	if _state.capacity < cost:
 		return false
 	_state.nutrients += amount
@@ -166,12 +184,48 @@ func _step_ecology() -> void:
 	var egested_fish := total_predation - assimilated_fish
 	var maintenance_fish := c.fish_maintenance_rate * s.fish
 
-	s.algae = maxf(s.algae + (algae_growth - algae_death - total_grazing) * dt, 0.0)
-	s.nutrients = maxf(s.nutrients + (-algae_growth + remineralization) * dt, 0.0)
-	s.detritus = maxf(s.detritus + (algae_death - remineralization + total_egested + total_baseline_death + egested_fish) * dt, 0.0)
-	s.fish = maxf(s.fish + (assimilated_fish - maintenance_fish) * dt, 0.0)
-	s.respired += maintenance_fish * dt
+	# Decomposer and apex predator (backlog scaffold - see sim_config.gd):
+	# every term below is exactly 0.0 when its enable flag is off, which is
+	# the default, so this changes nothing about the currently shipped loop.
+	var decomposer_consumption := 0.0
+	var decomposer_assimilated := 0.0
+	var decomposer_remineralized := 0.0
+	var decomposer_mortality := 0.0
+	if c.enable_decomposer:
+		decomposer_consumption = c.decomposer_ingestion_rate * s.decomposer * (s.detritus / (s.detritus + c.decomposer_detritus_half_saturation))
+		decomposer_assimilated = decomposer_consumption * c.decomposer_assimilation_efficiency
+		decomposer_remineralized = decomposer_consumption - decomposer_assimilated
+		decomposer_mortality = c.decomposer_mortality_rate * s.decomposer
 
+	var apex_predation := 0.0
+	var apex_assimilated := 0.0
+	var apex_egested := 0.0
+	var apex_maintenance := 0.0
+	if c.enable_apex_predator:
+		apex_predation = c.apex_predator_ingestion_rate * s.apex_predator * (s.fish / (s.fish + c.apex_predator_fish_half_saturation))
+		apex_assimilated = apex_predation * c.apex_predator_trophic_efficiency
+		apex_egested = apex_predation - apex_assimilated
+		apex_maintenance = c.apex_predator_maintenance_rate * s.apex_predator
+
+	s.algae = maxf(s.algae + (algae_growth - algae_death - total_grazing) * dt, 0.0)
+	s.nutrients = maxf(s.nutrients + (-algae_growth + remineralization + decomposer_remineralized) * dt, 0.0)
+	s.detritus = maxf(s.detritus + (algae_death - remineralization + total_egested + total_baseline_death + egested_fish - decomposer_consumption + decomposer_mortality + apex_egested) * dt, 0.0)
+	s.fish = maxf(s.fish + (assimilated_fish - maintenance_fish - apex_predation) * dt, 0.0)
+	s.decomposer = maxf(s.decomposer + (decomposer_assimilated - decomposer_mortality) * dt, 0.0)
+	s.apex_predator = maxf(s.apex_predator + (apex_assimilated - apex_maintenance) * dt, 0.0)
+	s.respired += (maintenance_fish + apex_maintenance) * dt
+
+	# Real per-tick consumption, for Track B's eat-flash pacing (see
+	# SimState) - not part of the mass ledger, just a readout of flows
+	# already applied above.
+	s.algae_grazed_this_tick = total_grazing * dt
+	s.daphnia_predated_this_tick = total_predation * dt
+
+	# Known scaffold limitation: capacity regen (_trophic_diversity below)
+	# and _check_collapse_restart() don't yet account for decomposer/
+	# apex_predator - deliberately deferred, since neither species is part
+	# of the live loop yet (both enable flags default off). Extend both
+	# once these are actually integrated rather than left as a backlog item.
 	var daphnia_total := _daphnia.total_population()
 	var living_biomass := s.algae + daphnia_total + s.fish
 	var trophic_diversity := _trophic_diversity(s.algae, daphnia_total, s.fish)

@@ -106,6 +106,49 @@ var initial_nutrients: float = 20.0
 var initial_detritus: float = 0.0
 var initial_fish: float = 0.5
 
+# --- Decomposer (backlog scaffold, §9's "architecture shouldn't foreclose
+# this") - a detritus-eating species creating a second, two-way nutrient
+# loop alongside the existing algae/daphnia/fish chain: it consumes
+# detritus, splitting the intake between its own biomass and directly
+# remineralized nutrients (the same assimilated/egested-style split fish
+# and daphnia already use), and its own mortality returns to detritus
+# rather than being respired - decomposing decomposer is still organic
+# matter re-entering the pool, unlike a vertebrate's metabolic loss.
+# Scalar, not trait-binned: Phase 4 already established that evolution
+# stays scoped to one demonstration species (§11.4's four-principle
+# legibility limit) - a second evolving population would double the
+# tuning surface for a mechanic that isn't part of the shipped loop yet.
+# Gated behind enable_decomposer (default off) so every existing harness
+# and the current playable loop are completely unaffected; see
+# sim/harness/decomposer_apex_predator_check.gd for the scaffold's own
+# mass-conservation/sanity check. Values below are a plausible first
+# guess, not sweep-tuned - there's no acceptance criterion for this yet
+# since it isn't a build-order phase.
+var enable_decomposer: bool = false
+var decomposer_ingestion_rate: float = 0.3
+var decomposer_detritus_half_saturation: float = 8.0
+var decomposer_assimilation_efficiency: float = 0.4
+var decomposer_mortality_rate: float = 0.03
+var initial_decomposer: float = 0.0
+
+# --- Apex predator (backlog scaffold) - preys on fish, closing a fourth
+# trophic level. Deliberately slow (low ingestion/reproduction) by design:
+# a fast-moving 4th level would double the number of oscillating
+# relationships the player has to track (§11.4's quadratic-interactions
+# warning); a slow one instead reads as an occasional, gentle check on
+# fish rather than another fast cycle to babysit. Scalar, not trait-binned,
+# same reasoning as the decomposer above. Its predation reduces fish
+# directly (mirroring how fish predation reduces daphnia), assimilated
+# biomass becomes apex_predator, egested biomass returns to detritus, and
+# its own maintenance is respired - following fish's own pattern one level
+# up. Gated behind enable_apex_predator (default off).
+var enable_apex_predator: bool = false
+var apex_predator_ingestion_rate: float = 0.02
+var apex_predator_fish_half_saturation: float = 1.0
+var apex_predator_trophic_efficiency: float = 0.10
+var apex_predator_maintenance_rate: float = 0.002
+var initial_apex_predator: float = 0.0
+
 # --- Difficulty / pacing --------------------------------------------------
 # A single time-dilation multiplier applied uniformly to every ecological
 # rate - see sim_core.gd's _step_ecology and _step_daphnia_bins, which both
