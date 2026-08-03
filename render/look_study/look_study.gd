@@ -810,8 +810,9 @@ func _resize_to_population(list: Array[Dictionary], population: float, max_parti
 ## organism vanishing right after a founder introduction. Reconciling
 ## against the absolute target every time means there's never a phantom
 ## overshoot left for a later call to "fix."
-func _reconcile_population(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> Array[Dictionary]:
+func _reconcile_population(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> Dictionary:
 	var new_entries: Array[Dictionary] = []
+	var grown_entries: Array[Dictionary] = []
 	var whole := int(floor(clamped))
 	var fractional := clamped - float(whole)
 	var has_bud := fractional > GROWTH_BUD_MIN_FRACTION
@@ -854,14 +855,24 @@ func _reconcile_population(list: Array[Dictionary], clamped: float, max_particle
 				list.append(entry)
 				new_entries.append(entry)
 		else:
-			list[bud_index]["grow_scale"] = clampf(fractional, GROWTH_BUD_MIN_SCALE, 1.0)
+			# An EXISTING bud growing further isn't a new entry, but it's
+			# still real, visible progress worth flagging when it's a
+			# jump/introduction driving it (see _apply_population_jump) -
+			# distinct from new_entries because it should get a ripple
+			# without the from-scratch pop-in reset (it already has a
+			# size; snapping it down to INTRODUCTION_START_SCALE first
+			# would look like it shrank).
+			var target_scale := clampf(fractional, GROWTH_BUD_MIN_SCALE, 1.0)
+			if target_scale > list[bud_index]["grow_scale"]:
+				grown_entries.append(list[bud_index])
+			list[bud_index]["grow_scale"] = target_scale
 	elif bud_index >= 0:
 		# The fractional remainder shrank away without reaching a whole
 		# individual (population declined within the same integer
 		# bracket) - the bud dies rather than being promoted.
 		list.remove_at(bud_index)
 
-	return new_entries
+	return {"new": new_entries, "grown": grown_entries}
 
 func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> void:
 	_reconcile_population(list, clamped, max_particles, spawn_fn)
@@ -881,14 +892,32 @@ func _find_non_bud_index(list: Array[Dictionary]) -> int:
 ## A discrete event - a founder introduction (delta > 0) or a sudden wipe
 ## like a collapse (delta < 0). Reconciliation itself (see
 ## _reconcile_population) is identical to ordinary smooth growth; the
-## only thing this adds is flagging genuinely new entries so an
-## introduction visibly announces itself (pop-in animation, a ripple at
-## the spawn point, a short sound) instead of appearing indistinguishable
-## from anything already there - which independently of any position bug
-## is easy to misread as "an existing organism just moved."
+## only thing this adds is flagging genuinely new/grown entries so an
+## introduction visibly (and audibly) announces itself instead of
+## appearing indistinguishable from anything already there - which
+## independently of any position bug is easy to misread as "an existing
+## organism just moved."
+##
+## Sound/ripple feedback is keyed off new_entries OR grown_entries, not
+## "new_entries alone" - once a population has been running long enough
+## for reproduction to keep a bud continuously in progress (the normal
+## state, not an edge case), an introduction landing on top of that bud
+## usually just bumps its fraction higher without ever creating a new
+## dict entry. An earlier version only checked new_entries, so a real,
+## successful introduction (introduce_species had already returned true,
+## capacity spent) would silently produce no sound or ripple at all -
+## reported directly as "the introduction sound worked the first few
+## times and then stopped working later on," confirmed with a
+## deterministic reproduction (hand-built list with a low-fraction bud,
+## a jump that only raises its fraction) showing zero ripples/no sound
+## despite delta > 0.
 func _apply_population_jump(list: Array[Dictionary], clamped: float, delta: float, max_particles: int, spawn_fn: Callable) -> void:
-	var new_entries := _reconcile_population(list, clamped, max_particles, spawn_fn)
-	if delta <= 0.0 or new_entries.is_empty():
+	var result := _reconcile_population(list, clamped, max_particles, spawn_fn)
+	if delta <= 0.0:
+		return
+	var new_entries: Array[Dictionary] = result["new"]
+	var grown_entries: Array[Dictionary] = result["grown"]
+	if new_entries.is_empty() and grown_entries.is_empty():
 		return
 	for entry in new_entries:
 		# introduction_target_scale is whatever _reconcile_population
@@ -900,6 +929,12 @@ func _apply_population_jump(list: Array[Dictionary], clamped: float, delta: floa
 		entry["introduction_target_scale"] = entry["grow_scale"]
 		entry["grow_scale"] = INTRODUCTION_START_SCALE
 		entry["introduction_age"] = 0.0
+		_spawn_ripple(entry.pos)
+	for entry in grown_entries:
+		# Already partially grown before this call, just grew further
+		# than it would have on its own - a ripple at its current size
+		# and position is the honest signal here, not a from-scratch
+		# pop-in (which would visually shrink it first).
 		_spawn_ripple(entry.pos)
 	_introduction_sfx.play()
 
