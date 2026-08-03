@@ -242,13 +242,36 @@ player should diagnose by looking":
 **The pond and the UI are now a real side-by-side split**, not overlapping layers - direct
 feedback was that the pond itself should carry no UI chrome at all. `look_study.tscn` splits
 into an `HBoxContainer` with a `PondViewport` (background + creatures, expands to fill
-whatever's left) and a fixed-width `%SidePanel` holding everything actionable: one
-self-contained card per species (icon, population gauge bar, Introduce button), gauge bars
-for capacity/nutrients/detritus/daphnia mean size, the nutrient-amount control, and the
-difficulty buttons. The pond itself keeps only the effects that are arguably part of the
-water/scene rather than HUD chrome - nutrient tint, silt density, the collapse flash -
-nothing else draws on top of it. Numeric values are still shown next to each bar
-(`NUMERIC_LABELS_ENABLED`) for the same playtesting reason as before.
+whatever's left) and a fixed-width `%SidePanel` holding everything actionable. The pond
+itself keeps only the effects that are arguably part of the water/scene rather than HUD
+chrome - nutrient tint, silt density, the collapse flash - nothing else draws on top of it.
+
+The panel went through two passes. The first pass got the data wiring right (every gauge
+tied to the correct `SimCore` value, verified headlessly) but got the layout wrong - direct
+feedback after the first look in the editor: it required scrolling in both directions to
+reach lower controls, and capacity (the resource spent on every action) was buried near the
+bottom. The second pass was a real UX redesign, grounded in research on game HUD/resource-
+panel conventions (hierarchy by importance/urgency, single-glance peripheral readability,
+consistent color per resource) rather than another guess:
+
+- **Capacity now leads the panel**, with a taller bar than the read-only metrics below it
+- **No `ScrollContainer` at all** - every species card and metric is a single compact row
+  (icon or label, a colored gauge bar, the current value, and - for species - a small "+"
+  button) instead of a stacked header/bar/button block, which is what actually caused the
+  vertical overflow; a stack of separate rows for one species was the bug, not the amount of
+  content
+- **Each resource has a consistent color** reused everywhere it appears - algae/daphnia/fish
+  bars match their own pond particle colors, capacity reuses the "bioluminescent" glow color
+  from the removed orb gauge it replaced, nutrients/detritus are brighter variants of their
+  pond-tint colors
+- **Difficulty is a toggle-button group** (`ButtonGroup`, mutually exclusive) instead of
+  three plain buttons plus a separate "Pace: Nx" label - the pressed/highlighted button state
+  *is* the pace readout now, one fewer row
+- A custom `StyleBoxFlat` gives the panel a dark teal background instead of Godot's default
+  gray, matching the pond's calm aesthetic
+
+Numeric values are still shown next to each bar (`NUMERIC_LABELS_ENABLED`) for the same
+playtesting reason as before - this was a layout/color pass, not a "hide the numbers" pass.
 
 **A cross-track lesson from playtesting**: tying eat-flash frequency to the real
 grazing/predation rate (above) removed the old per-predator cooldown that used to
@@ -276,7 +299,10 @@ I can't visually judge whether any of this actually looks *right* - same ceiling
 audio work, where every check was technical (does it run without errors, are the numbers in
 sane ranges) rather than a judgment of quality. The side-panel split specifically has one
 more layer to that ceiling: headless testing confirmed every widget exists, is wired to the
-right SimCore value, and updates correctly, but Godot's Container layout sizing doesn't
-resolve without a real render pass, so the actual on-screen proportions (does the pond
-genuinely dominate the window the way it's supposed to) can only be confirmed by running it
-in the editor. Worth actually playing before trusting any of this.
+right SimCore value, and updates correctly (including the difficulty `ButtonGroup`'s
+mutual-exclusivity), but Godot's Container layout sizing doesn't resolve without a real
+render pass, so the actual on-screen proportions - does the pond genuinely dominate the
+window, does the redesigned panel actually fit without scrolling now - can only be confirmed
+by running it in the editor. The first panel pass shipped without that check and the
+overflow it caused was only caught from a real screenshot; worth another real look before
+trusting this pass either.

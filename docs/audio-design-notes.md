@@ -153,11 +153,18 @@ the timing complaint, which is exactly why the latency theory needed real verifi
 before being trusted.
 
 **An instant envelope jump causes an audible click, which is easy to mistake for
-"clipping."** Retriggering a note by snapping its amplitude straight to full volume
-(rather than a short smoothed attack ramp, even just ~10-50ms) creates a real
-discontinuity in the waveform. The fix is always a short attack ramp starting from true
-silence — every retriggerable note voice in this system (`_advance_note()`) works this
-way now.
+"clipping" — but resetting `note.age` to 0 on retrigger does NOT by itself guarantee
+one.** The original fix here (an attack ramp computed from `note.age`) has a gap: age
+resetting to 0 makes the *formula* read near-zero, but if the previous note was still
+audible above that when the new one triggered, the actual applied sample still jumps
+from that leftover value down to the new near-zero one in a single sample — a real
+discontinuity the age-based formula alone can't see. Confirmed this mattered in practice
+for the bass specifically: `BASS_DECAY_RATE` gives it a ~5.4s natural decay against a
+0.9s beat interval, so most beats retrigger a note still ringing at meaningful amplitude.
+The actual fix is `note.smoothed_envelope`, a one-pole filter that chases the formula's
+target value over `ENVELOPE_SMOOTHING_TIME` instead of jumping straight to it — that's
+what makes every transition continuous, retrigger or not (`_advance_note()` and
+`_fill_bass()`'s own inline copy of the same logic both work this way now).
 
 **Per-layer clamping does not prevent the mix from clipping.** Each voice's own DSP output
 is clamped to ±1.0 before it ever reaches a bus, but that only protects that layer's own
@@ -177,6 +184,47 @@ just that one incident.
 
 ## 5. Known open items for the next pass
 
+- **"The bass is clipping and getting distorted, and so are other sounds at times"
+  (user report on a recorded session) — investigated at length, root cause still
+  unconfirmed.** What was actually measured, in order:
+  - The real exported video audio has no digital clipping anywhere: whole-file peak was
+    -17dBFS, and a custom sample-level click detector (scans for isolated one-sample
+    deltas far above the local RMS floor — see `click_detect.gd` in this session's
+    scratch work, not checked into the repo) found zero click/dropout events in the
+    actual recording, only two edge-of-recording artifacts at the very start/end.
+  - Rendering the bass layer alone (`--isolate=Bass`) reproduces a tall, full-spectrum
+    (up to ~21kHz) broadband spike on every single note attack, visible in a
+    spectrogram. This looked initially like a strong lead, but it turned out to be
+    unaffected by `BASS_ATTACK_TIME` (tested 8ms vs. 25ms) or `ENVELOPE_SMOOTHING_TIME`
+    (tested 3ms vs. 20ms) — neither change visibly softened it. That means it's not
+    explained by the envelope-continuity fix above (which is a real improvement on its
+    own merits, just not a fix for *this* symptom), and it may simply be a normal
+    time/frequency-resolution artifact of how a spectrogram renders any percussive
+    attack transient rather than genuine audible distortion — unconfirmed either way.
+  - Forced a burst of 13 overlapping interaction-chime events into an 8-second window
+    (deliberately worse than the real per-species eat cooldown would ever allow) to test
+    whether multiple simultaneous "other sounds" could push the mix into the limiter:
+    peak stayed at 0.298 (-10.5dB), nowhere near the ceiling.
+  - Checked the `PondFoundation` bus (drone+bass, pre-limiter) directly against
+    `Master` (post-limiter) during a real render: pre-limiter peak was 0.12, meaning the
+    limiter never engages under any tested condition — ruling out limiter soft-clip
+    saturation too.
+  - None of this rules out a real defect — it rules out every specific mechanism
+    checked so far (true digital clipping, bus/limiter engagement, envelope
+    discontinuity, chime-stacking overshoot). One thing it does NOT rule out: every test
+    here ran `--headless`, with none of the real editor/Movie-Maker-recording overhead
+    (actual rendering, compositing, input polling) that was present when the reviewed
+    session was captured. The fill functions run in `_process()`, so any real frame
+    hitch under that extra load could starve `AudioStreamGeneratorPlayback`'s ring
+    buffer and produce exactly this kind of artifact in a way no headless test could
+    ever reproduce. Worth checking whether the same clip, played from an exported
+    release build instead of the editor's debug/Movie Maker capture, still has it —
+    that would cleanly separate "real synthesis bug" from "editor-recording overhead."
+    This is also not the first report of this general shape — README documents an
+    earlier "crunch/clipping distortion sounds throughout the game" report that was
+    addressed with a global eat-flash cooldown, verified only by event-spacing
+    measurement, explicitly not by ear. Worth treating this as possibly the same
+    underlying issue resurfacing rather than a fully independent one.
 - **Overall volume still reads as too quiet as of this writing**, even after a broad
   make-up-gain pass on both bus branches (+6dB each, applied before the shared limiter so
   clipping safety is unaffected). This needs a fresh listen — it's possible the right fix
@@ -216,6 +264,7 @@ for a loaded generated clip would not require restructuring this scene.
 | v8 | Raised bass gain ~7dB after measuring it was ~14dB below the mix | Bass became inaudible after v7's "make it subtle" fix overshot |
 | v9 | Split one reverb bus into three (PondFoundation/PondAmbient/PondMix); gave the blue note its own fast/unaccented envelope; warmed bass tone further | "More dissonance," "sustained feedback loops"; verified reverb wasn't literally unstable, fixed the mix architecture and the passing-tone treatment anyway |
 | v10 | +6dB make-up gain on both bus branches (before the limiter) | Still described as "too quiet" — good stopping point otherwise |
+| v11 | Added `note.smoothed_envelope` (real fix for age-reset-doesn't-guarantee-continuity, see §4); extensively measured but did NOT confirm a root cause for reported clipping/distortion — see §5 | User reported clipping/distortion in a recorded session |
 
 ## 8. Sources consulted
 

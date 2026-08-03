@@ -11,16 +11,12 @@ config_version=5
 [application]
 
 config/name="Pond"
-run/main_scene="res://scenes/debug_chart.tscn"
+run/main_scene="res://render/look_study/look_study.tscn"
 config/features=PackedStringArray("4.7")
 
 [autoload]
 
 PondEvents="*res://render/pond_events.gd"
-
-[display]
-
-window/vsync/vsync_mode=1
 
 [rendering]
 

@@ -271,7 +271,7 @@ func _ensure_audio_buses() -> void:
 
 
 static func _new_note_voice() -> Dictionary:
-	return {"phase": 0.0, "freq": 0.0, "age": 0.0, "active": false}
+	return {"phase": 0.0, "freq": 0.0, "age": 0.0, "active": false, "smoothed_envelope": 0.0}
 
 
 func _new_voice_state(initial_elapsed: float = 0.0) -> Dictionary:
@@ -367,28 +367,45 @@ func _fill_voices() -> void:
 		_voices[vi] = v
 
 
+## How long the ACTUAL applied envelope takes to slew toward wherever the
+## attack/decay formula below says it should be - see _advance_note and
+## _fill_bass. Short enough to not audibly soften even the tightest attack
+## (interaction chimes: 12ms) or blur a note's decay shape, long enough
+## (relative to a single 1/48000s sample) to turn an instantaneous jump
+## into an inaudibly-fast slew instead of a click.
+const ENVELOPE_SMOOTHING_TIME := 0.003
+
+
 ## Shared per-sample envelope for a single retriggerable note voice - a
-## short smoothed attack (never an instant jump, which is what produced
-## clicking/"clipping" in an earlier pass) followed by an exponential
-## decay. Envelope is a pure function of note.age, which resets to 0 on
-## every trigger, so it always starts from true silence - continuous
-## even if a new note interrupts one still ringing. attack_time and
-## decay_rate are passed in per-voice-type: interaction notes get a much
-## tighter attack (feels tied to the instant of the event) and a shorter
-## ring than phrase notes (which are rarer and can afford to be more
-## spacious).
+## short attack followed by an exponential decay, both computed as a pure
+## function of note.age (which resets to 0 on every trigger). That
+## formula alone does NOT guarantee a click-free retrigger, despite an
+## earlier version of this comment claiming it did: resetting age to 0
+## makes the FORMULA evaluate near zero, but if the PREVIOUS note was
+## still ringing above that (bass in particular: a ~5.4s natural decay
+## interrupted every 0.9s beat, so every beat retriggers at roughly 28% of
+## peak) the actual output sample still jumps from that leftover amplitude
+## down to the new near-zero value in a single sample - an audible click,
+## confirmed directly as regular full-spectrum broadband streaks in a
+## spectrogram of a recorded session, at a spacing matching the bass beat
+## and the interaction chimes' own event rate. The real fix is
+## note.smoothed_envelope, which chases the formula's target value at
+## ENVELOPE_SMOOTHING_TIME rather than jumping straight to it - this is
+## what actually makes every transition continuous, retrigger or not.
 static func _advance_note(note: Dictionary, frame_dt: float, attack_time: float, decay_rate: float) -> float:
-	if not note.active:
-		return 0.0
-	note.age += frame_dt
-	var attack: float = clampf(note.age / attack_time, 0.0, 1.0)
-	var decay: float = exp(-maxf(note.age - attack_time, 0.0) * decay_rate)
-	var envelope := attack * decay
-	note.phase += note.freq * frame_dt
-	if envelope < 0.0005 and note.age > attack_time:
-		note.active = false
-		return 0.0
-	return _bowl_wave(note.phase) * envelope
+	var target_envelope := 0.0
+	if note.active:
+		note.age += frame_dt
+		var attack: float = clampf(note.age / attack_time, 0.0, 1.0)
+		var decay: float = exp(-maxf(note.age - attack_time, 0.0) * decay_rate)
+		target_envelope = attack * decay
+		note.phase += note.freq * frame_dt
+		if target_envelope < 0.0005 and note.age > attack_time:
+			note.active = false
+
+	var smoothing: float = minf(1.0, frame_dt / ENVELOPE_SMOOTHING_TIME)
+	note.smoothed_envelope += (target_envelope - note.smoothed_envelope) * smoothing
+	return _bowl_wave(note.phase) * note.smoothed_envelope
 
 
 func _fill_phrase() -> void:
@@ -428,19 +445,32 @@ func _fill_bass() -> void:
 	var frame_dt := 1.0 / MIX_RATE
 	var to_fill := _bass_playback.get_frames_available()
 	for i in to_fill:
-		if not _bass_note.active:
-			_bass_playback.push_frame(Vector2.ZERO)
-			continue
-		_bass_note.age += frame_dt
-		var attack: float = clampf(_bass_note.age / BASS_ATTACK_TIME, 0.0, 1.0)
-		var amp_envelope: float = attack * exp(-maxf(_bass_note.age - BASS_ATTACK_TIME, 0.0) * _bass_decay_rate)
-		if amp_envelope < 0.0005 and _bass_note.age > BASS_ATTACK_TIME:
-			_bass_note.active = false
+		# Same fix as _advance_note (bass has its own inline copy of this
+		# envelope rather than sharing that function, since it also drives
+		# the filter cutoff below): a beat every 0.9s retriggers a note
+		# that takes ~5.4s to fully decay, so nearly every beat used to
+		# interrupt one still ringing at meaningful amplitude - jumping
+		# note.age straight to 0 made the ENVELOPE FORMULA read near zero,
+		# but the actual output sample still snapped from wherever it
+		# previously was down to that in one sample. smoothed_envelope
+		# chases the formula's target instead of jumping to it, which is
+		# what actually makes the transition continuous.
+		var target_envelope := 0.0
+		if _bass_note.active:
+			_bass_note.age += frame_dt
+			var attack: float = clampf(_bass_note.age / BASS_ATTACK_TIME, 0.0, 1.0)
+			target_envelope = attack * exp(-maxf(_bass_note.age - BASS_ATTACK_TIME, 0.0) * _bass_decay_rate)
+			if target_envelope < 0.0005 and _bass_note.age > BASS_ATTACK_TIME:
+				_bass_note.active = false
+			_bass_note.phase += float(_bass_note.freq) * frame_dt
+
+		var smoothing: float = minf(1.0, frame_dt / ENVELOPE_SMOOTHING_TIME)
+		_bass_note.smoothed_envelope += (target_envelope - _bass_note.smoothed_envelope) * smoothing
+		var amp_envelope: float = _bass_note.smoothed_envelope
 
 		_bass_filter_env = maxf(_bass_filter_env - BASS_FILTER_ENV_DECAY * frame_dt, 0.0)
 		var cutoff := lerpf(BASS_FILTER_MIN_CUTOFF, BASS_FILTER_MAX_CUTOFF, _bass_filter_env)
 
-		_bass_note.phase += float(_bass_note.freq) * frame_dt
 		var phase: float = _bass_note.phase
 		var triangle: float = (2.0 / PI) * asin(sin(phase * TAU))
 		var saw: float = 2.0 * (phase - floor(phase + 0.5))

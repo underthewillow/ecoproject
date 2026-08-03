@@ -125,6 +125,27 @@ const ALGAE_POP_COLOR := Color(0.55, 0.85, 0.5)
 const DAPHNIA_POP_COLOR := Color(0.75, 0.88, 0.95)
 const FISH_POP_COLOR := Color(1.0, 0.72, 0.25)
 
+## Side panel gauge-bar fill colors (§ redesign: research on game-UI
+## color coding recommends each resource read as consistently the same
+## color everywhere it appears, and reserving distinct hues for things the
+## player actually acts on/watches). Algae/daphnia/fish reuse their
+## existing pond particle colors so the panel and the pond agree visually.
+## Capacity reuses the "bioluminescent" glow color from the removed orb
+## gauge it replaced, so that association carries over. Nutrients/detritus
+## are brighter variants of their pond-tint colors (the tint colors
+## themselves are too dark/desaturated to read well as a bar fill against
+## the panel background). Daphnia mean size gets its own distinct hue since
+## it's a different kind of thing - a trait/evolution signal, not a count.
+const PANEL_BACKGROUND_COLOR := Color(0.07, 0.11, 0.12, 0.97)
+const ALGAE_GAUGE_COLOR := ALGAE_POP_COLOR
+const DAPHNIA_GAUGE_COLOR := DAPHNIA_POP_COLOR
+const FISH_GAUGE_COLOR := FISH_POP_COLOR
+const CAPACITY_GAUGE_COLOR := Color(0.6, 0.95, 0.85)
+const NUTRIENTS_GAUGE_COLOR := Color(0.78, 0.72, 0.35)
+const DETRITUS_GAUGE_COLOR := Color(0.62, 0.56, 0.46)
+const DAPHNIA_SIZE_GAUGE_COLOR := Color(0.82, 0.6, 0.88)
+const GAUGE_TRACK_COLOR := Color(0.0, 0.0, 0.0, 0.35)
+
 ## Ceilings for the near-1:1 population->sprite mapping (see
 ## _resize_to_population) - not a "how full does the screen look"
 ## normalization anymore, just a hard cap so an extreme founder count
@@ -184,8 +205,15 @@ const DAPHNIA_VISUAL_SIZE_SCALE_RANGE := Vector2(0.5, 1.8)
 const DAPHNIA_GAUGE_MAX_POPULATION := 20.0
 const FISH_GAUGE_MAX_POPULATION := 5.0
 const NUTRIENT_TINT_REFERENCE_LEVEL := 25.0  # also the nutrient gauge bar's max - one number, two uses
-const DETRITUS_REFERENCE_LEVEL := 15.0  # also the detritus gauge bar's max
-const CAPACITY_GAUGE_MAX := 200.0
+## Recalibrated against a real recorded session (see docs/audio-design-notes.md's UI review
+## entry): detritus held 25-45 for the whole clip, well above the old reference of 15, which
+## pegged the bar visually full for the entire session with no headroom to show it still
+## climbing; capacity held 2-16 the whole time against a max of 200, which made the bar read
+## as almost perpetually empty. Both defeated the redesign's "gauge should read as alive at a
+## glance" goal. Still a by-feel estimate, not a hard sim ceiling - may need another pass once
+## there's a longer/higher-population session to calibrate against.
+const DETRITUS_REFERENCE_LEVEL := 50.0  # also the detritus gauge bar's max
+const CAPACITY_GAUGE_MAX := 40.0
 
 const NUTRIENT_TINT_COLOR := Color(0.45, 0.42, 0.18)
 const NUTRIENT_TINT_MAX_ALPHA := 0.28
@@ -315,7 +343,6 @@ var _detritus_value_label: Label
 var _daphnia_size_bar: ProgressBar
 var _daphnia_size_value_label: Label
 var _collapse_count_label: Label
-var _pace_label: Label
 
 func _ready() -> void:
 	randomize()  # cosmetic layer only - no determinism requirement here, unlike the sim's seeded RNG
@@ -345,53 +372,81 @@ func _ready() -> void:
 ## reaches sideways into a sibling Control to place the UI, rather than
 ## parenting it onto itself the way an earlier pass did (which drew
 ## directly on top of the pond).
+##
+## Redesigned after direct feedback on a first pass that required
+## scrolling in both directions to reach lower controls and buried
+## capacity (the resource spent on every action) near the bottom.
+## Research on game HUD/resource-panel conventions (hierarchy by
+## importance/urgency, single-glance readability, consistent color coding
+## per resource) informed the fixes: capacity now leads the panel; every
+## species/metric is a single compact row (icon or label, a colored gauge
+## bar, the current value, and - for species - a small "+" button) instead
+## of stacked header/bar/button blocks, which is what actually caused the
+## vertical overflow; and there is deliberately no ScrollContainer at all
+## - the compact rows are meant to always fit without one.
 func _build_ui() -> void:
-	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-	%SidePanel.add_child(scroll)
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = PANEL_BACKGROUND_COLOR
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_top = 12
+	panel_style.content_margin_bottom = 12
+	%SidePanel.add_theme_stylebox_override("panel", panel_style)
 
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 10)
-	content.custom_minimum_size = Vector2(240, 0)
-	scroll.add_child(content)
+	content.add_theme_constant_override("separation", 8)
+	%SidePanel.add_child(content)
 
-	content.add_child(_make_label("Difficulty"))
-	var difficulty_row := HBoxContainer.new()
-	content.add_child(difficulty_row)
-	difficulty_row.add_child(_make_button("Challenging", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CHALLENGING])))
-	difficulty_row.add_child(_make_button("Casual", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CASUAL])))
-	difficulty_row.add_child(_make_button("Relaxing", func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.RELAXING])))
-	_pace_label = _make_label("Pace:")
-	content.add_child(_pace_label)
+	# Capacity leads the panel (hierarchy by importance: it's spent on
+	# every action, so it gets the most prominent position and a taller
+	# bar than the read-only metrics further down).
+	var capacity_metric := _make_metric_row("Capacity", CAPACITY_GAUGE_COLOR, 22.0)
+	content.add_child(capacity_metric.root)
+	_capacity_bar = capacity_metric.bar
+	_capacity_value_label = capacity_metric.value_label
 
 	content.add_child(HSeparator.new())
 
+	var difficulty_group := ButtonGroup.new()
+	var difficulty_row := HBoxContainer.new()
+	difficulty_row.add_theme_constant_override("separation", 4)
+	content.add_child(difficulty_row)
+	var challenging_btn := _make_toggle_button("Challenging", difficulty_group, func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CHALLENGING]))
+	var casual_btn := _make_toggle_button("Casual", difficulty_group, func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.CASUAL]))
+	var relaxing_btn := _make_toggle_button("Relaxing", difficulty_group, func(): _sim.set_pace_scale(SimConfig.PACE_SCALE_BY_DIFFICULTY[SimConfig.Difficulty.RELAXING]))
+	challenging_btn.button_pressed = true  # matches the actual startup default (pace_scale=1.0) - the toggle state itself is the pace readout now, no separate label needed
+	difficulty_row.add_child(challenging_btn)
+	difficulty_row.add_child(casual_btn)
+	difficulty_row.add_child(relaxing_btn)
+
 	var founder_row := HBoxContainer.new()
 	content.add_child(founder_row)
-	founder_row.add_child(_make_label("Founder count:"))
+	var founder_label := _make_label("Founder count")
+	founder_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	founder_row.add_child(founder_label)
 	_founder_spin = SpinBox.new()
 	_founder_spin.min_value = 0.5
 	_founder_spin.max_value = 50.0
 	_founder_spin.step = 0.5
 	_founder_spin.value = FOUNDER_DEFAULT
-	_founder_spin.custom_minimum_size = Vector2(70, 0)
+	_founder_spin.custom_minimum_size = Vector2(64, 0)
 	founder_row.add_child(_founder_spin)
 
 	content.add_child(HSeparator.new())
 
-	var algae_card := _make_species_card(ALGAE_TEXTURE, "Algae", func(): _sim.introduce_species("algae", _founder_spin.value))
+	var algae_card := _make_species_card(ALGAE_TEXTURE, "Algae", ALGAE_GAUGE_COLOR, func(): _sim.introduce_species("algae", _founder_spin.value))
 	content.add_child(algae_card.root)
 	_algae_bar = algae_card.bar
 	_algae_value_label = algae_card.value_label
 	_algae_button = algae_card.button
 
-	var daphnia_card := _make_species_card(DAPHNIA_TEXTURE, "Daphnia", func(): _sim.introduce_species("daphnia", _founder_spin.value))
+	var daphnia_card := _make_species_card(DAPHNIA_TEXTURE, "Daphnia", DAPHNIA_GAUGE_COLOR, func(): _sim.introduce_species("daphnia", _founder_spin.value))
 	content.add_child(daphnia_card.root)
 	_daphnia_bar = daphnia_card.bar
 	_daphnia_value_label = daphnia_card.value_label
 	_daphnia_button = daphnia_card.button
 
-	var fish_card := _make_species_card(FISH_TEXTURE, "Fish", func(): _sim.introduce_species("fish", _founder_spin.value))
+	var fish_card := _make_species_card(FISH_TEXTURE, "Fish", FISH_GAUGE_COLOR, func(): _sim.introduce_species("fish", _founder_spin.value))
 	content.add_child(fish_card.root)
 	_fish_bar = fish_card.bar
 	_fish_value_label = fish_card.value_label
@@ -399,41 +454,33 @@ func _build_ui() -> void:
 
 	content.add_child(HSeparator.new())
 
-	var nutrients_metric := _make_metric_row("Nutrients")
+	var nutrients_metric := _make_metric_row("Nutrients", NUTRIENTS_GAUGE_COLOR)
 	content.add_child(nutrients_metric.root)
 	_nutrients_bar = nutrients_metric.bar
 	_nutrients_value_label = nutrients_metric.value_label
 
 	var nutrient_amount_row := HBoxContainer.new()
 	content.add_child(nutrient_amount_row)
-	nutrient_amount_row.add_child(_make_label("Amount:"))
+	var nutrient_amount_label := _make_label("Amount")
+	nutrient_amount_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nutrient_amount_row.add_child(nutrient_amount_label)
 	_nutrient_spin = SpinBox.new()
 	_nutrient_spin.min_value = 0.5
 	_nutrient_spin.max_value = 50.0
 	_nutrient_spin.step = 0.5
 	_nutrient_spin.value = NUTRIENT_AMOUNT_DEFAULT
-	_nutrient_spin.custom_minimum_size = Vector2(70, 0)
+	_nutrient_spin.custom_minimum_size = Vector2(64, 0)
 	nutrient_amount_row.add_child(_nutrient_spin)
-	_nutrient_button = _make_button("Add Nutrients", func(): _sim.add_nutrients(_nutrient_spin.value))
+	_nutrient_button = _make_button("Add", func(): _sim.add_nutrients(_nutrient_spin.value))
+	_nutrient_button.custom_minimum_size = Vector2(44, 0)
 	nutrient_amount_row.add_child(_nutrient_button)
 
-	content.add_child(HSeparator.new())
-
-	var detritus_metric := _make_metric_row("Detritus")
+	var detritus_metric := _make_metric_row("Detritus", DETRITUS_GAUGE_COLOR)
 	content.add_child(detritus_metric.root)
 	_detritus_bar = detritus_metric.bar
 	_detritus_value_label = detritus_metric.value_label
 
-	content.add_child(HSeparator.new())
-
-	var capacity_metric := _make_metric_row("Capacity")
-	content.add_child(capacity_metric.root)
-	_capacity_bar = capacity_metric.bar
-	_capacity_value_label = capacity_metric.value_label
-
-	content.add_child(HSeparator.new())
-
-	var daphnia_size_metric := _make_metric_row("Daphnia mean size")
+	var daphnia_size_metric := _make_metric_row("Daphnia size", DAPHNIA_SIZE_GAUGE_COLOR)
 	content.add_child(daphnia_size_metric.root)
 	_daphnia_size_bar = daphnia_size_metric.bar
 	_daphnia_size_value_label = daphnia_size_metric.value_label
@@ -445,6 +492,7 @@ func _build_ui() -> void:
 func _make_label(text: String) -> Label:
 	var label := Label.new()
 	label.text = text
+	label.add_theme_font_size_override("font_size", 13)
 	return label
 
 func _make_button(text: String, on_pressed: Callable) -> Button:
@@ -453,59 +501,98 @@ func _make_button(text: String, on_pressed: Callable) -> Button:
 	button.pressed.connect(on_pressed)
 	return button
 
-## One self-contained row per species (§ side-panel redesign: icon, gauge,
-## and the Introduce button live together rather than in separate grouped
-## sections) - everything needed to read and act on one species stays in
-## one place. Returns the pieces the caller needs to keep updating.
-func _make_species_card(texture: Texture2D, species_name: String, on_introduce: Callable) -> Dictionary:
-	var root := VBoxContainer.new()
+## Toggle-mode buttons sharing a ButtonGroup behave as a mutually-exclusive
+## radio set - Godot handles the "only one pressed at a time" bookkeeping
+## natively. Using the pressed/highlighted visual state to show which
+## difficulty is active removes the need for a separate "Pace: Nx" label
+## entirely, which is one whole row saved.
+func _make_toggle_button(text: String, group: ButtonGroup, on_pressed: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.toggle_mode = true
+	button.button_group = group
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.add_theme_font_size_override("font_size", 12)
+	button.pressed.connect(on_pressed)
+	return button
 
-	var header := HBoxContainer.new()
-	root.add_child(header)
+## A colored, rounded gauge bar - see the const block above for why each
+## resource gets its own consistent color rather than one default style.
+func _make_gauge_bar(fill_color: Color, bar_height: float = 18.0) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, bar_height)
+
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = fill_color
+	fill_style.set_corner_radius_all(4)
+	bar.add_theme_stylebox_override("fill", fill_style)
+
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = GAUGE_TRACK_COLOR
+	track_style.set_corner_radius_all(4)
+	bar.add_theme_stylebox_override("background", track_style)
+
+	return bar
+
+## One self-contained row per species: icon, gauge, current value, and the
+## Introduce button all on a single line - everything needed to read and
+## act on one species stays together, and a single row (rather than a
+## stacked header/bar/button block) is what actually keeps the panel from
+## overflowing vertically. Returns the pieces the caller needs to keep
+## updating.
+func _make_species_card(texture: Texture2D, species_name: String, color: Color, on_introduce: Callable) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
 
 	var icon := TextureRect.new()
 	icon.texture = texture
-	icon.custom_minimum_size = Vector2(28, 28)
+	icon.custom_minimum_size = Vector2(22, 22)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	header.add_child(icon)
+	row.add_child(icon)
 
 	var name_label := _make_label(species_name)
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(name_label)
+	name_label.custom_minimum_size = Vector2(50, 0)
+	row.add_child(name_label)
+
+	var bar := _make_gauge_bar(color)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(bar)
 
 	var value_label := _make_label("")
-	header.add_child(value_label)
+	value_label.custom_minimum_size = Vector2(34, 0)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(value_label)
 
-	var bar := ProgressBar.new()
-	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(0, 16)
-	root.add_child(bar)
+	var button := _make_button("+", on_introduce)
+	button.custom_minimum_size = Vector2(26, 0)
+	button.tooltip_text = "Introduce " + species_name
+	row.add_child(button)
 
-	var button := _make_button("Introduce " + species_name, on_introduce)
-	root.add_child(button)
+	return {"root": row, "bar": bar, "value_label": value_label, "button": button}
 
-	return {"root": root, "bar": bar, "value_label": value_label, "button": button}
+## A read-only gauge (no button) for a single metric - label, a colored
+## bar, and the current value on one line. bar_height lets capacity render
+## slightly taller than the rest (hierarchy by importance).
+func _make_metric_row(label_text: String, color: Color, bar_height: float = 18.0) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
 
-## A read-only gauge (no button) for a single metric - label, current
-## value, and a bar stacked together.
-func _make_metric_row(label_text: String) -> Dictionary:
-	var root := VBoxContainer.new()
-
-	var header := HBoxContainer.new()
-	root.add_child(header)
 	var label := _make_label(label_text)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(label)
+	label.custom_minimum_size = Vector2(74, 0)
+	row.add_child(label)
+
+	var bar := _make_gauge_bar(color, bar_height)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(bar)
+
 	var value_label := _make_label("")
-	header.add_child(value_label)
+	value_label.custom_minimum_size = Vector2(40, 0)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(value_label)
 
-	var bar := ProgressBar.new()
-	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(0, 16)
-	root.add_child(bar)
-
-	return {"root": root, "bar": bar, "value_label": value_label}
+	return {"root": row, "bar": bar, "value_label": value_label}
 
 ## Non-numeric affordability cue (§7 - no cost/capacity numbers shown):
 ## grey out whichever introduce/nutrient action the player currently can't
@@ -539,7 +626,6 @@ func _update_panel(state) -> void:
 	_daphnia_size_value_label.text = ("%.2f" % state.daphnia_mean_size) if NUMERIC_LABELS_ENABLED else ""
 
 	_collapse_count_label.text = "Collapses: %d" % state.collapse_count
-	_pace_label.text = "Pace: %.2fx" % _sim.get_pace_scale()
 
 func _set_gauge(bar: ProgressBar, value_label: Label, value: float, max_value: float) -> void:
 	bar.min_value = 0.0
@@ -905,7 +991,21 @@ func _try_eat(eater: Dictionary, prey_list: Array[Dictionary], eat_radius: float
 	if not _spend_eat_credit(trophic_level):
 		return false
 	_pops.append({"pos": prey_list[idx].pos, "color": pop_color, "age": 0.0})
-	prey_list[idx] = respawn_fn.call()
+	# If the eaten entry happened to be the one _resize_to_population is
+	# tracking as the in-progress growth bud, a bare respawn_fn.call()
+	# replacement (which carries no is_bud/grow_scale keys) silently
+	# breaks that tracking: _find_bud_index() then finds nothing next
+	# frame, _apply_smooth_growth miscounts plain_count as one too high,
+	# removes an unrelated real individual to compensate, and spawns a
+	# fresh bud elsewhere - visible as an unrelated individual vanishing
+	# right as a new partial one appears, most noticeable right after a
+	# founder introduction when the population is still small. Carrying
+	# the bud markers over onto the replacement keeps the invariant intact.
+	var replacement: Dictionary = respawn_fn.call()
+	if prey_list[idx].get("is_bud", false):
+		replacement["is_bud"] = true
+		replacement["grow_scale"] = prey_list[idx].get("grow_scale", 1.0)
+	prey_list[idx] = replacement
 	PondEvents.predation.emit(trophic_level)
 	return true
 
