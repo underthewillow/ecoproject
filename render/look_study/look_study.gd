@@ -764,26 +764,54 @@ func _resize_to_population(list: Array[Dictionary], population: float, max_parti
 	var delta := clamped - prev_population
 
 	if absf(delta) >= POPULATION_JUMP_THRESHOLD:
-		_apply_population_jump(list, delta, max_particles, spawn_fn)
+		_apply_population_jump(list, clamped, delta, max_particles, spawn_fn)
 	else:
 		_apply_smooth_growth(list, clamped, max_particles, spawn_fn)
 
 	return clamped
 
-## Smooth, continuous change (ordinary tick-by-tick reproduction/death).
-## The bud is tracked by an explicit "is_bud" marker on its own dict entry,
-## not by array position ("whichever entry happens to be last") - a jump
-## can append a brand new entry after the bud (see _apply_population_jump),
-## which would silently make the FOUNDER "last" instead of the bud, so a
-## positional convention would just relocate the original bug one tick
-## later: the very next smooth-growth call would promote the pre-existing
-## bud (no longer last) to full and start shrinking the founder (now last)
-## down to the fractional remainder - the same swap the user reported,
-## just delayed by a tick instead of fixed. Tracking identity explicitly
-## means the bud keeps being the SAME sprite across calls regardless of
-## what else gets added or removed around it, and a founder introduced as
-## full stays full until it naturally, individually declines on its own.
-func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> void:
+## Reconciles list to exactly match clamped (some number of full-size
+## individuals plus at most one fractional "growth bud"), returning
+## whichever entries were newly created (not merely adjusted) this call -
+## a brand new whole individual, or a brand new bud - so a caller that
+## wants to flag genuinely new arrivals (see _apply_population_jump) can
+## do so without also flagging an existing bud that merely grew further
+## along. Shared by ordinary tick-by-tick reproduction/death AND founder
+## introductions/collapses - the bud/whole bookkeeping is identical
+## either way; they only differ in whether the result should look "new"
+## to the player (see _apply_population_jump).
+##
+## The bud is tracked by an explicit "is_bud" marker on its own dict
+## entry, not by array position ("whichever entry happens to be last") -
+## a jump can append a brand new entry after the bud, which would
+## silently make the FOUNDER "last" instead of the bud, so a positional
+## convention would just relocate the original bug one tick later: the
+## very next call would promote the pre-existing bud (no longer last) to
+## full and start shrinking the founder (now last) down to the fractional
+## remainder - the same swap the user reported, just delayed by a tick
+## instead of fixed. Tracking identity explicitly means the bud keeps
+## being the SAME sprite across calls regardless of what else gets added
+## or removed around it.
+##
+## plain_count is reconciled against whole = floor(clamped) - an ABSOLUTE
+## target - rather than against how many individuals a single call's
+## delta alone would suggest adding/removing. An earlier version of
+## _apply_population_jump derived its count from
+## maxi(1, round(delta)) directly: delta is a continuous ecological
+## quantity that is essentially never a whole number in real play
+## (organic growth never stops between ticks, and founder counts as small
+## as 0.5 - the SpinBox's own minimum/step - guarantee it further), so
+## rounding it directly systematically overshot the render list relative
+## to the true population by up to ~1 individual. The very next
+## reconciliation would then "correct" that phantom overshoot by removing
+## (or, on a decrease, adding) an unrelated, completely untouched
+## individual to make plain_count match whole again - confirmed directly
+## as the actual mechanism behind reports of "positions changing"/an
+## organism vanishing right after a founder introduction. Reconciling
+## against the absolute target every time means there's never a phantom
+## overshoot left for a later call to "fix."
+func _reconcile_population(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> Array[Dictionary]:
+	var new_entries: Array[Dictionary] = []
 	var whole := int(floor(clamped))
 	var fractional := clamped - float(whole)
 	var has_bud := fractional > GROWTH_BUD_MIN_FRACTION
@@ -805,6 +833,7 @@ func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles
 			var entry: Dictionary = spawn_fn.call()
 			entry["grow_scale"] = 1.0
 			list.append(entry)
+			new_entries.append(entry)
 		else:
 			break
 		plain_count += 1
@@ -823,6 +852,7 @@ func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles
 				entry["grow_scale"] = clampf(fractional, GROWTH_BUD_MIN_SCALE, 1.0)
 				entry["is_bud"] = true
 				list.append(entry)
+				new_entries.append(entry)
 		else:
 			list[bud_index]["grow_scale"] = clampf(fractional, GROWTH_BUD_MIN_SCALE, 1.0)
 	elif bud_index >= 0:
@@ -830,6 +860,11 @@ func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles
 		# individual (population declined within the same integer
 		# bracket) - the bud dies rather than being promoted.
 		list.remove_at(bud_index)
+
+	return new_entries
+
+func _apply_smooth_growth(list: Array[Dictionary], clamped: float, max_particles: int, spawn_fn: Callable) -> void:
+	_reconcile_population(list, clamped, max_particles, spawn_fn)
 
 func _find_bud_index(list: Array[Dictionary]) -> int:
 	for i in list.size():
@@ -844,45 +879,29 @@ func _find_non_bud_index(list: Array[Dictionary]) -> int:
 	return -1
 
 ## A discrete event - a founder introduction (delta > 0) or a sudden wipe
-## like a collapse (delta < 0) - touches only what actually changed and
-## leaves everything else exactly as it was. In particular, an existing
-## partially-grown bud keeps its own progress rather than being promoted
-## or reshuffled: "founders should come in full size" means the NEW
-## individuals are full and separate, not that whatever was already
-## growing gets absorbed into representing them.
-func _apply_population_jump(list: Array[Dictionary], delta: float, max_particles: int, spawn_fn: Callable) -> void:
-	if delta > 0.0:
-		# max(1, ...): round() alone can floor a jump right back to zero
-		# effect - anything under 0.5 rounds to 0 - which would silently
-		# drop a jump that was, by definition (it crossed
-		# POPULATION_JUMP_THRESHOLD, currently 0.3), too big to be smooth
-		# growth. A real founder introduction is always >= 0.5 (the
-		# SpinBox's own minimum) so this only ever bites in the narrow
-		# threshold-to-0.5 gap, but silently doing nothing there is worse
-		# than slightly overshooting by rendering at least one individual.
-		var new_count := maxi(1, int(round(delta)))
-		var spawned_any := false
-		for i in new_count:
-			if list.size() >= max_particles:
-				break
-			var entry: Dictionary = spawn_fn.call()
-			# Starts small and grows into place over INTRODUCTION_GROW_TIME
-			# (see _step_introductions) plus a ripple at its spawn point,
-			# rather than popping in at full size indistinguishable from
-			# everything already there.
-			entry["grow_scale"] = INTRODUCTION_START_SCALE
-			entry["introduction_age"] = 0.0
-			list.append(entry)
-			_spawn_ripple(entry.pos)
-			spawned_any = true
-		if spawned_any:
-			_introduction_sfx.play()
-	else:
-		var remove_count := maxi(1, int(round(-delta)))
-		for i in remove_count:
-			if list.is_empty():
-				break
-			list.pop_back()
+## like a collapse (delta < 0). Reconciliation itself (see
+## _reconcile_population) is identical to ordinary smooth growth; the
+## only thing this adds is flagging genuinely new entries so an
+## introduction visibly announces itself (pop-in animation, a ripple at
+## the spawn point, a short sound) instead of appearing indistinguishable
+## from anything already there - which independently of any position bug
+## is easy to misread as "an existing organism just moved."
+func _apply_population_jump(list: Array[Dictionary], clamped: float, delta: float, max_particles: int, spawn_fn: Callable) -> void:
+	var new_entries := _reconcile_population(list, clamped, max_particles, spawn_fn)
+	if delta <= 0.0 or new_entries.is_empty():
+		return
+	for entry in new_entries:
+		# introduction_target_scale is whatever _reconcile_population
+		# already decided this entry's settled size should be - 1.0 for a
+		# whole individual, a fraction for a freshly-created bud - so the
+		# pop-in animates TOWARD that, not unconditionally to full size
+		# (which would visually show a full individual for what the sim
+		# still only counts as a fractional one).
+		entry["introduction_target_scale"] = entry["grow_scale"]
+		entry["grow_scale"] = INTRODUCTION_START_SCALE
+		entry["introduction_age"] = 0.0
+		_spawn_ripple(entry.pos)
+	_introduction_sfx.play()
 
 func _spawn_algae() -> Dictionary:
 	return {"pos": _random_position(), "drift_phase": randf() * TAU}
@@ -1103,23 +1122,27 @@ func _step_ripples(delta: float) -> void:
 	_ripples = _ripples.filter(func(r): return r.age < RIPPLE_DURATION + RIPPLE_RING_DELAY)
 
 ## Grows a freshly-introduced individual from INTRODUCTION_START_SCALE up
-## to full size over INTRODUCTION_GROW_TIME - a separate mechanic from the
-## growth-bud's grow_scale (§ _apply_smooth_growth), even though both
-## ultimately drive the same field: a bud represents ongoing fractional
-## reproduction and is tracked by identity (is_bud) across ticks, while an
-## "introducing" entry is already a full, counted individual that's just
-## playing a short pop-in animation once. Untagged (no "introduction_age"
-## key) once it reaches full size, same as a bud loses "is_bud" once
-## promoted.
+## to introduction_target_scale (1.0 for a whole individual, a fraction
+## for a freshly-created bud - see _apply_population_jump) over
+## INTRODUCTION_GROW_TIME - a separate mechanic from the growth-bud's
+## grow_scale (§ _reconcile_population), even though both ultimately
+## drive the same field: a bud represents ongoing fractional reproduction
+## and is tracked by identity (is_bud) across ticks, while an
+## "introducing" entry is already a full, counted individual (or bud)
+## that's just playing a short pop-in animation once. Untagged (no
+## "introduction_age" key) once it settles, same as a bud loses "is_bud"
+## once promoted.
 func _step_introductions(list: Array[Dictionary], delta: float) -> void:
 	for e in list:
 		if not e.has("introduction_age"):
 			continue
 		e.introduction_age += delta
 		var t: float = clampf(e.introduction_age / INTRODUCTION_GROW_TIME, 0.0, 1.0)
-		e["grow_scale"] = lerpf(INTRODUCTION_START_SCALE, 1.0, t)
+		var target: float = e.get("introduction_target_scale", 1.0)
+		e["grow_scale"] = lerpf(INTRODUCTION_START_SCALE, target, t)
 		if t >= 1.0:
 			e.erase("introduction_age")
+			e.erase("introduction_target_scale")
 
 ## Contain rather than wrap: a pond has edges, so a particle sliding off
 ## one side and reappearing on the other would read as a screen glitch,
