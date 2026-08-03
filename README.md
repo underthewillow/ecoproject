@@ -306,3 +306,25 @@ window, does the redesigned panel actually fit without scrolling now - can only 
 by running it in the editor. The first panel pass shipped without that check and the
 overflow it caused was only caught from a real screenshot; worth another real look before
 trusting this pass either.
+
+### B3 swapped for a licensed ambient track (temporary)
+
+A later playtest reported "the bass is clipping and getting distorted, and so are other
+sounds at times." That was investigated hard - digital clipping, limiter engagement,
+chime-stacking overshoot, and envelope discontinuity were all directly measured and ruled
+out, without finding a confirmed root cause (full writeup in `docs/audio-design-notes.md`
+§5). Rather than keep debugging blind, `look_study.tscn` now instances
+`render/audio/ambient_music.tscn` (a single looping royalty-free track) in place of
+`pond_audio.tscn` for the prototype. `pond_audio.tscn`/`.gd` are untouched and still fully
+wired up - swapping back is a one-line change in `look_study.tscn` once the underlying issue
+is understood, or once it's worth re-verifying it doesn't reproduce outside the editor's
+debug/Movie-Maker capture (the leading remaining theory - see the audio design notes).
+
+Track: "Tranquility Base" by Kevin MacLeod (incompetech.com), licensed under
+[Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) - see
+Credits below.
+
+## Credits
+
+- "Tranquility Base" by Kevin MacLeod (incompetech.com), licensed under Creative Commons:
+  By Attribution 4.0 License (http://creativecommons.org/licenses/by/4.0/)

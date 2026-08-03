@@ -1,5 +1,13 @@
 # Track B Phase B3 — Audio Design Notes
 
+**Status as of 2026-08-02: not currently active in the shipped scene.** After the clipping
+investigation in §5 below failed to find a confirmed root cause, `look_study.tscn` was
+switched to instance `render/audio/ambient_music.tscn` (a single licensed ambient track)
+instead of `pond_audio.tscn`, so the prototype has reliable audio while this is unresolved.
+Nothing in this document or in `pond_audio.gd` changed because of that swap - it's still the
+intended long-term system, just not wired into the active scene right now. See README's "B3
+swapped for a licensed ambient track" section for the swap itself.
+
 Status as of 2026-08-01: **workable, not final.** This is a stopping point after ten
 iterations, most of them driven by direct listening feedback rather than getting it right
 the first time. The remaining known issue is that overall volume still reads as too quiet

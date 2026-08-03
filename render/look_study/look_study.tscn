@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://render/look_study/look_study.gd" id="1"]
 [ext_resource type="Texture2D" path="res://render/water/pond_background.png" id="2"]
-[ext_resource type="PackedScene" path="res://render/audio/pond_audio.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://render/audio/ambient_music.tscn" id="3"]
 
 [node name="LookStudy" type="Control"]
 layout_mode = 3
@@ -51,4 +51,4 @@ custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
 size_flags_horizontal = 0
 
-[node name="PondAudio" parent="." instance=ExtResource("3")]
+[node name="AmbientMusic" parent="." instance=ExtResource("3")]
