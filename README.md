@@ -328,3 +328,5 @@ Credits below.
 
 - "Tranquility Base" by Kevin MacLeod (incompetech.com), licensed under Creative Commons:
   By Attribution 4.0 License (http://creativecommons.org/licenses/by/4.0/)
+- "Water Drop" by ABStudios (freesound.org), licensed under Creative Commons Attribution 4.0
+  (https://creativecommons.org/licenses/by/4.0/) - the founder-introduction sound effect

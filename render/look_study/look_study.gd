@@ -273,6 +273,26 @@ const DAPHNIA_EAT_MIN_INTERVAL := 0.4
 
 const POP_DURATION := 0.5
 
+## A founder introduction pops new individuals into an existing,
+## already-moving population with zero visual distinction from anything
+## already there - direct feedback was that this reads as "positions
+## changing," since there's no way to tell a brand new individual apart
+## from an existing one that simply drifted/hopped/glided on its own (see
+## _apply_population_jump). A quick grow-in plus a ripple at the spawn
+## point (real drop-in-water reads: a ring expanding from a point) gives
+## the new arrival an obvious, trackable "this one just appeared here"
+## moment instead.
+const INTRODUCTION_START_SCALE := 0.1
+const INTRODUCTION_GROW_TIME := 0.35
+const RIPPLE_DURATION := 0.9
+const RIPPLE_MIN_RADIUS := 3.0
+const RIPPLE_MAX_RADIUS := 24.0
+const RIPPLE_LINE_WIDTH := 1.6
+const RIPPLE_COLOR := Color(0.85, 0.95, 1.0, 0.6)
+## Two concentric rings per drop (the second starts RIPPLE_RING_DELAY
+## later) reads more like an actual water ripple than a single ring.
+const RIPPLE_RING_DELAY := 0.15
+
 ## Silt's COUNT is not a species population, but its density now tracks
 ## real detritus (§7's "detritus accumulation" being one of the four things
 ## a player should be able to diagnose by looking) - SILT_COUNT is the
@@ -314,9 +334,12 @@ var _algae: Array[Dictionary] = []
 var _daphnia: Array[Dictionary] = []
 var _fish: Array[Dictionary] = []
 var _pops: Array[Dictionary] = []
+var _ripples: Array[Dictionary] = []
 var _silt: Array[Dictionary] = []
 var _rocks: Array[Dictionary] = []
 var _lilypads: Array[Dictionary] = []
+
+var _introduction_sfx: AudioStreamPlayer
 
 var _founder_spin: SpinBox
 var _nutrient_spin: SpinBox
@@ -362,6 +385,7 @@ func _ready() -> void:
 		_rocks.append(_spawn_rock())
 	for i in LILYPAD_COUNT:
 		_lilypads.append(_spawn_lilypad())
+	_introduction_sfx = $IntroductionSfx
 	_build_ui()
 
 ## The two player verbs (§6) plus every gauge, built into %SidePanel (see
@@ -644,6 +668,10 @@ func _process(delta: float) -> void:
 	_step_daphnia(delta)
 	_step_fish(delta)
 	_step_pops(delta)
+	_step_ripples(delta)
+	_step_introductions(_algae, delta)
+	_step_introductions(_daphnia, delta)
+	_step_introductions(_fish, delta)
 	_step_silt(delta)
 	_step_lilypads(delta)
 	queue_redraw()
@@ -833,12 +861,22 @@ func _apply_population_jump(list: Array[Dictionary], delta: float, max_particles
 		# threshold-to-0.5 gap, but silently doing nothing there is worse
 		# than slightly overshooting by rendering at least one individual.
 		var new_count := maxi(1, int(round(delta)))
+		var spawned_any := false
 		for i in new_count:
 			if list.size() >= max_particles:
 				break
 			var entry: Dictionary = spawn_fn.call()
-			entry["grow_scale"] = 1.0
+			# Starts small and grows into place over INTRODUCTION_GROW_TIME
+			# (see _step_introductions) plus a ripple at its spawn point,
+			# rather than popping in at full size indistinguishable from
+			# everything already there.
+			entry["grow_scale"] = INTRODUCTION_START_SCALE
+			entry["introduction_age"] = 0.0
 			list.append(entry)
+			_spawn_ripple(entry.pos)
+			spawned_any = true
+		if spawned_any:
+			_introduction_sfx.play()
 	else:
 		var remove_count := maxi(1, int(round(-delta)))
 		for i in remove_count:
@@ -1056,6 +1094,33 @@ func _step_pops(delta: float) -> void:
 		p.age += delta
 	_pops = _pops.filter(func(p): return p.age < POP_DURATION)
 
+func _spawn_ripple(pos: Vector2) -> void:
+	_ripples.append({"pos": pos, "age": 0.0})
+
+func _step_ripples(delta: float) -> void:
+	for r in _ripples:
+		r.age += delta
+	_ripples = _ripples.filter(func(r): return r.age < RIPPLE_DURATION + RIPPLE_RING_DELAY)
+
+## Grows a freshly-introduced individual from INTRODUCTION_START_SCALE up
+## to full size over INTRODUCTION_GROW_TIME - a separate mechanic from the
+## growth-bud's grow_scale (§ _apply_smooth_growth), even though both
+## ultimately drive the same field: a bud represents ongoing fractional
+## reproduction and is tracked by identity (is_bud) across ticks, while an
+## "introducing" entry is already a full, counted individual that's just
+## playing a short pop-in animation once. Untagged (no "introduction_age"
+## key) once it reaches full size, same as a bud loses "is_bud" once
+## promoted.
+func _step_introductions(list: Array[Dictionary], delta: float) -> void:
+	for e in list:
+		if not e.has("introduction_age"):
+			continue
+		e.introduction_age += delta
+		var t: float = clampf(e.introduction_age / INTRODUCTION_GROW_TIME, 0.0, 1.0)
+		e["grow_scale"] = lerpf(INTRODUCTION_START_SCALE, 1.0, t)
+		if t >= 1.0:
+			e.erase("introduction_age")
+
 ## Contain rather than wrap: a pond has edges, so a particle sliding off
 ## one side and reappearing on the other would read as a screen glitch,
 ## not a boundary.
@@ -1199,6 +1264,14 @@ func _draw() -> void:
 		color.a = 1.0 - t
 		draw_circle(p.pos, lerpf(2.0, 14.0, t), color)
 
+	# Drawn on top of everything else so a founder's ripple stays legible
+	# even where it overlaps an existing creature - the whole point is
+	# "look here, something just appeared," which a ripple hidden behind a
+	# sprite wouldn't achieve.
+	for r in _ripples:
+		_draw_ripple_ring(r.pos, r.age)
+		_draw_ripple_ring(r.pos, r.age - RIPPLE_RING_DELAY)
+
 	_draw_collapse_flash()
 
 ## Nutrient load (§7) - a full-scene translucent wash rather than a
@@ -1226,3 +1299,16 @@ func _draw_collapse_flash() -> void:
 	var color := COLLAPSE_FLASH_COLOR
 	color.a = t * 0.5
 	draw_rect(Rect2(Vector2.ZERO, size), color)
+
+## age < 0 means this ring hasn't started yet (see RIPPLE_RING_DELAY's
+## second, staggered ring) - drawing nothing rather than clamping to 0
+## keeps the two rings visibly offset instead of briefly overlapping at
+## the same radius.
+func _draw_ripple_ring(pos: Vector2, age: float) -> void:
+	if age < 0.0 or age >= RIPPLE_DURATION:
+		return
+	var t := age / RIPPLE_DURATION
+	var radius := lerpf(RIPPLE_MIN_RADIUS, RIPPLE_MAX_RADIUS, t)
+	var color := RIPPLE_COLOR
+	color.a *= 1.0 - t
+	draw_arc(pos, radius, 0.0, TAU, 24, color, RIPPLE_LINE_WIDTH, true)

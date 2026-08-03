@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://render/look_study/look_study.gd" id="1"]
 [ext_resource type="Texture2D" path="res://render/water/pond_background.png" id="2"]
 [ext_resource type="PackedScene" path="res://render/audio/ambient_music.tscn" id="3"]
+[ext_resource type="AudioStream" path="res://render/audio/sfx/water_drop.mp3" id="4"]
 
 [node name="LookStudy" type="Control"]
 layout_mode = 3
@@ -44,6 +45,11 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
+
+[node name="IntroductionSfx" type="AudioStreamPlayer" parent="MainLayout/PondViewport/Particles"]
+stream = ExtResource("4")
+volume_db = -14.0
+bus = &"Master"
 
 [node name="SidePanel" type="PanelContainer" parent="MainLayout"]
 unique_name_in_owner = true
